@@ -1,0 +1,95 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "av2"
+description = "Argoverse 2: Next generation datasets for self-driving perception and forecasting."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.8"
+
+keywords = [
+    "argoverse",
+    "argoverse2",
+    "autonomous-driving",
+    "av1",
+    "av2",
+    "3d-object-detection",
+    "3d-scene-flow",
+    "4d-occupancy-forecasting",
+    "e2e-forecasting",
+    "motion-forecasting",
+]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Rust",
+]
+
+dependencies = [
+    "av",
+    "click",
+    "joblib",
+    "kornia",
+    "matplotlib",
+    "nox",
+    "numba",
+    "numpy",
+    "opencv-python",
+    "pandas",
+    "polars",
+    "pyarrow",
+    "pyproj",
+    "rich",
+    "scipy",
+    "torch",
+    "tqdm",
+    "universal_pathlib",
+]
+
+dynamic = ["authors", "description", "version"]
+
+[project.optional-dependencies]
+lint = ["black[jupyter]", "mypy", "ruff"]
+test = ["pytest", "pytest-benchmark", "pytest-cov"]
+
+[project.urls]
+homepage = "https://argoverse.org"
+repository = "https://github.com/argoverse/av2-api"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "av2._r"
+
+[tool.ruff]
+select = ["D"]
+
+[tool.ruff.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+exclude = "build"
+ignore_missing_imports = true
+disallow_untyped_calls = false
+disallow_untyped_decorators = false
+plugins = "numpy.typing.mypy_plugin"
+strict = true
+
+[tool.pyright]
+include = ["src"]
+
+reportMissingTypeStubs = false
+reportUnknownMemberType = false
+reportUntypedFunctionDecorator = false
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "--cov-report term-missing:skip-covered --cov av2"
+testpaths = ["tests"]

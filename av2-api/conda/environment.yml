@@ -1,0 +1,29 @@
+name: av2
+channels:
+  - conda-forge
+dependencies:
+  - av
+  - click
+  - joblib
+  - kornia
+  - matplotlib-base
+  - maturin
+  - nox
+  - numba
+  - numpy
+  - openblas
+  - opencv
+  - openssl
+  - pandas
+  - pip
+  - polars
+  - pyarrow
+  - pyproj
+  - rich
+  - rust
+  - scipy
+  - pytorch
+  - tqdm
+  - universal_pathlib
+  - pip:
+      - git+https://github.com/JonathonLuiten/TrackEval.git
