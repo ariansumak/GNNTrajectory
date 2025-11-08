@@ -8,10 +8,13 @@ from pathlib import Path
 
 import torch
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_DATA_ROOT = PROJECT_ROOT / "data"
+
 
 @dataclass
 class DataConfig:
-    root: Path = Path("data/av2/motion-forecasting/train")
+    root: Path = DEFAULT_DATA_ROOT
     split: str = "train"
     obs_seconds: float = 7.0
     fut_seconds: float = 4.0

@@ -53,6 +53,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pack_padded_sequence
+from pathlib import Path
 
 try:
     from scipy.spatial import cKDTree as KDTree
@@ -426,15 +427,38 @@ def collate_scenes(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tens
 if __name__ == "__main__":
     import argparse
 
+    REPO_ROOT = Path(__file__).resolve().parents[2]
+    DEFAULT_DATA_ROOT = REPO_ROOT / "data"
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root_csv_dir", type=str, required=True,
-                        help="Folder containing train/val/test subfolders with scenario CSVs")
+    parser.add_argument(
+        "--root_csv_dir",
+        type=str,
+        default=str(DEFAULT_DATA_ROOT),
+        help="Folder containing train/val/test subfolders with scenario CSVs (default: repo data/)",
+    )
+    parser.add_argument(
+        "--split",
+        type=str,
+        default="train",
+        choices=["train", "val", "test"],
+        help="Split to load from root directory.",
+    )
     parser.add_argument("--use_map", action="store_true")
     parser.add_argument("--map_dir", type=str, default=None, help="Path to argoverse-api 'map_files' directory")
     parser.add_argument("--batch_size", type=int, default=2)
     args = parser.parse_args()
 
-    ds = ArgoverseLSTMDataset(root_csv_dir=args.root_csv_dir, split="data", map_dir=args.map_dir, use_map=args.use_map)
+    root_path = Path(args.root_csv_dir)
+    if not root_path.exists():
+        raise FileNotFoundError(f"Provided root directory does not exist: {root_path}")
+
+    ds = ArgoverseLSTMDataset(
+        root_csv_dir=str(root_path),
+        split=args.split,
+        map_dir=args.map_dir,
+        use_map=args.use_map,
+    )
     sample = ds[42]
 
     x, mask, roles, agent_idx = sample["x_seqs"], sample["mask"], sample["roles"], sample["agent_idx"]
@@ -471,4 +495,3 @@ if __name__ == "__main__":
     emb = emb.view(B, N, H)
 
     print("Embeddings shape:", emb.shape)
-

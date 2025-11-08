@@ -1,0 +1,9 @@
+# Global ignores
+__pycache__/
+*.pyc
+.DS_Store
+
+# Local data and outputs
+/data/
+outputs/
+checkpoints/

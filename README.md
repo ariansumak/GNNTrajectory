@@ -15,10 +15,16 @@ Lightweight research scaffold for experimenting with GNN/LSTM-based trajectory f
 Everything in `src/gnn_trajectory` is intentionally lightweight. The default training run simply feeds `AV2GNNForecastingDataset` into a dummy LSTM encoder/linear decoder so you can verify the plumbing and then iterate toward richer GNN architectures.
 
 ## Environment setup
-1. **Clone**
+1. **Clone (with submodule)**
    ```bash
-   git clone <your-fork-url> GNNTrajectory
+   git clone --recurse-submodules <your-fork-url> GNNTrajectory
    cd GNNTrajectory
+   ```
+   Already cloned without `--recurse-submodules`? Run `git submodule update --init --recursive` once to pull the `av2-api/` sources.
+   To keep the submodule in sync when pulling new commits later:
+   ```bash
+   git pull
+   git submodule update --init --recursive
    ```
 2. **Python env (example with conda)**
    ```bash
@@ -37,7 +43,8 @@ Everything in `src/gnn_trajectory` is intentionally lightweight. The default tra
    *Already installed `av2` earlier?* As long as the same Python environment is still active, those modules remain available—you only need to reinstall if you created a fresh environment or upgraded Python.
 
 ## Data preparation
-- Set `ExperimentConfig.data.root` (see `src/gnn_trajectory/config.py`) to either the AV2 motion-forecasting root (containing `train/`, `val/`, `test/`) or directly to a single split directory if you only downloaded one of them.
+- The default config already points to the repository’s `data/` directory (resolved absolutely), so you can simply drop your AV2 scenario folders there—either the entire `motion-forecasting` tree or just one split—and the loader will detect whether the path already corresponds to a split.
+- Set `ExperimentConfig.data.root` (see `src/gnn_trajectory/config.py`) to another location if you keep the dataset elsewhere—either the AV2 motion-forecasting root (containing `train/`, `val/`, `test/`) or directly to a single split directory if you only downloaded one of them.
 - The code expects each scenario folder to contain both the parquet file and the matching `log_map_archive_*.json` static map, mirroring the official dataset release.
 - Adjust `obs_seconds`, `fut_seconds`, and `frequency_hz` in `DataConfig` to change the observation/prediction horizons used by the dataset and model.
 
@@ -52,6 +59,30 @@ What this does:
 - Optimizes a masked L2 loss (only valid future steps contribute) and logs ADE/FDE metrics computed with the same mask.
 
 To swap in a different encoder/decoder, modify `AgentForecastingModel` (or create a new module) and rewire `train.py` accordingly—the built-in training loop already handles masked losses/metrics and automatic device placement.
+
+## LSTM encoder basics
+The standalone LSTM encoder in `src/gnn_trajectory/models/lstm_encoder.py` is a convenience wrapper that can ingest either:
+1. A batch dictionary produced by `AV2GNNForecastingDataset` (requires at least `agent_hist` shaped `(max_agents, obs_len, feat_dim)` and optionally `fut_mask` for filtering padded agents).
+2. A raw tensor (`dummy_inputs`) shaped `(num_agents, obs_len, feature_dim)`—useful for quick experiments independent of any dataset.
+
+Usage patterns:
+```python
+from gnn_trajectory.models.lstm_encoder import DummyLSTMEncoder
+
+encoder = DummyLSTMEncoder()
+sample = av2_dataset[0]
+embeddings = encoder(batch=sample)                 # returns (num_valid_agents, hidden_dim)
+
+dummy = torch.randn(4, 70, 5)                      # agents, timesteps, features
+embeddings = encoder(dummy_inputs=dummy)           # same encoder, pure synthetic data
+```
+
+The helper script `scripts/demo_lstm_encoder.py` demonstrates mode (2) end-to-end:
+```bash
+PYTHONPATH=src python scripts/demo_lstm_encoder.py \
+  --agents 4 --timesteps 70 --features 5 --hidden-dim 128 --layers 1
+```
+Output shows the `(agents, hidden_dim)` embedding tensor so you can verify shapes before integrating the encoder into larger models.
 
 ## Visualization with `AV2GNNForecastingDataset`
 Use the custom dataset in `src/gnn_trajectory/data/argoverse2_dataset.py` (authored for local visualization) whenever you want to work with Argoverse scenes directly inside notebooks or scripts. It expects the standard folder structure:
@@ -73,7 +104,7 @@ from pathlib import Path
 from src.gnn_trajectory.data.argoverse2_dataset import AV2GNNForecastingDataset
 
 dataset = AV2GNNForecastingDataset(
-    root=Path("/abs/path/to/av2/motion-forecasting"),  # or .../train if you only downloaded that split
+    root=Path("data"),                                  # replace if your dataset lives elsewhere
     split="val",                                       # ignored when `root` already points to the split dir
     obs_sec=7,
     fut_sec=4,
@@ -88,12 +119,12 @@ print(sample["agent_hist"].shape)  # (max_agents, obs_len, 5)
 Command-line helper:
 ```bash
 python -m src.gnn_trajectory.data.argoverse2_dataset \
-  --root /abs/path/to/av2/motion-forecasting \
+  --root data \
   --split val \
   --index 0
 
 python test_argoverse2.py \
-  --root /abs/path/to/av2/motion-forecasting \
+  --root data \
   --split val \
   --num 1 \
   --vis         # add this flag to render the local-frame trajectories + lanes
