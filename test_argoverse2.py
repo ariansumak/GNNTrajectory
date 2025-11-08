@@ -5,11 +5,13 @@ Run:
 """
 
 from __future__ import annotations
+
 import argparse
-import torch
+
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
-from argoverse2_dataset_v2 import AV2GNNForecastingDataset
+
+from src.gnn_trajectory.data.argoverse2_dataset import AV2GNNForecastingDataset
 
 
 def parse_args():
@@ -48,7 +50,6 @@ def main():
         if i + 1 >= args.num:
             break
 def visualize(batch):
-    import matplotlib.pyplot as plt
     import numpy as np
 
     agent_hist = batch["agent_hist"][0].numpy()      # [A, To, 5]

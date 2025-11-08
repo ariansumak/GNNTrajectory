@@ -2,11 +2,23 @@
 Model components for trajectory prediction.
 """
 
-from .gnn import TrajectoryPredictor, InteractionNetwork, TrajectoryEncoder, TrajectoryDecoder
+from .agent_forecaster import AgentForecastingModel
+from .gnn import (
+    InteractionConfig,
+    InteractionNetwork,
+    TrajectoryDecoder,
+    TrajectoryEncoder,
+    TrajectoryPredictor,
+)
+from .lstm_encoder import DummyLSTMEncoder, LSTMEncoderConfig
 
 __all__ = [
-    "TrajectoryPredictor",
+    "AgentForecastingModel",
+    "DummyLSTMEncoder",
+    "InteractionConfig",
     "InteractionNetwork",
-    "TrajectoryEncoder",
+    "LSTMEncoderConfig",
     "TrajectoryDecoder",
+    "TrajectoryEncoder",
+    "TrajectoryPredictor",
 ]

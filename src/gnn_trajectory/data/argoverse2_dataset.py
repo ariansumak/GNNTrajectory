@@ -1,10 +1,14 @@
 # av2_gnn_dataset_localmaps.py (with local coordinate transform)
 from __future__ import annotations
+
+import argparse
+from pathlib import Path
+from typing import Dict, List
+
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from pathlib import Path
-from typing import Dict, List
+
 from av2.datasets.motion_forecasting.scenario_serialization import load_argoverse_scenario_parquet
 from av2.map.map_api import ArgoverseStaticMap
 
@@ -39,13 +43,21 @@ class AV2GNNForecastingDataset(Dataset):
                  agent_radius=30.0, knn_lanes=3):
         self.root = Path(root)
         self.split = split
+        candidate = self.root / split
+        if candidate.exists():
+            self.split_dir = candidate
+        elif self.root.exists():
+            # Allow pointing directly at a split directory (e.g., only `train` downloaded).
+            self.split_dir = self.root
+        else:
+            raise FileNotFoundError(f"Could not find dataset directory at {self.root}")
         self.obs_len = int(obs_sec * hz)
         self.pred_len = int(fut_sec * hz)
         self.dt = 1.0 / hz
         self.max_agents, self.max_lanes, self.max_pts = max_agents, max_lanes, max_pts
         self.agent_radius, self.knn_lanes = agent_radius, knn_lanes
 
-        self.scene_dirs = sorted((self.root / split).iterdir())
+        self.scene_dirs = sorted(self.split_dir.iterdir())
         self.scene_dirs = [d for d in self.scene_dirs if d.is_dir()]
         if not self.scene_dirs:
             raise FileNotFoundError(f"No scenario folders found in {split}")
@@ -141,3 +153,44 @@ class AV2GNNForecastingDataset(Dataset):
             "fut_traj": torch.tensor(np.pad(np.stack(futs[:A]), ((0, self.max_agents - A), (0, 0), (0, 0))), dtype=torch.float32),
             "fut_mask": torch.tensor(np.pad(np.stack(fmask[:A]), ((0, self.max_agents - A), (0, 0))), dtype=torch.float32),
         }
+
+
+def _parse_args():
+    parser = argparse.ArgumentParser(description="Inspect Argoverse 2 motion-forecasting samples.")
+    parser.add_argument(
+        "--root",
+        required=True,
+        help="Path to the Argoverse 2 motion-forecasting directory (the one containing train/val/test).",
+    )
+    parser.add_argument(
+        "--split",
+        default="train",
+        choices=["train", "val", "test"],
+        help="Dataset split to read from.",
+    )
+    parser.add_argument(
+        "--index",
+        type=int,
+        default=0,
+        help="Scenario index to inspect.",
+    )
+    return parser.parse_args()
+
+
+def _print_summary(sample: Dict[str, torch.Tensor]) -> None:
+    print(f"scenario_id: {sample['scenario_id']}")
+    print(f"agent_hist: {tuple(sample['agent_hist'].shape)}")
+    print(f"fut_traj: {tuple(sample['fut_traj'].shape)}")
+    print(f"fut_mask: {tuple(sample['fut_mask'].shape)}")
+    print(f"edge_index_aa: {tuple(sample['edge_index_aa'].shape)}")
+    print(f"edge_index_al: {tuple(sample['edge_index_al'].shape)}")
+    print(f"lane_nodes: {tuple(sample['lane_nodes'].shape)}")
+    print(f"lane_topology: {tuple(sample['lane_topology'].shape)}")
+
+
+if __name__ == "__main__":
+    args = _parse_args()
+    dataset = AV2GNNForecastingDataset(root=args.root, split=args.split)
+    print(f"Loaded {len(dataset)} scenarios from {args.root}/{args.split}")
+    sample = dataset[args.index]
+    _print_summary(sample)
