@@ -1,0 +1,143 @@
+# av2_gnn_dataset_localmaps.py (with local coordinate transform)
+from __future__ import annotations
+import numpy as np
+import torch
+from torch.utils.data import Dataset
+from pathlib import Path
+from typing import Dict, List
+from av2.datasets.motion_forecasting.scenario_serialization import load_argoverse_scenario_parquet
+from av2.map.map_api import ArgoverseStaticMap
+
+
+AV2_DYNAMIC_CLASSES = {
+    "vehicle": 0, "pedestrian": 1, "motorcyclist": 2, "cyclist": 3, "bus": 4,
+    "static": 5, "background": 6, "construction": 7, "riderless_bycicle": 8, "unknown": 9
+}
+
+
+def _angle_wrap(a): return (a + np.pi) % (2 * np.pi) - np.pi
+def _pad(arr, t, axis=0): return np.pad(arr, [(0, max(0, t - arr.shape[axis]))] + [(0, 0)] * (arr.ndim - 1))
+def _radius_graph(x, r):
+    N = len(x)
+    edges = [(i, j) for i in range(N) for j in range(i + 1, N) if np.linalg.norm(x[i] - x[j]) < r]
+    if not edges: 
+        return np.zeros((2, 0), np.int64)
+    e = np.array(edges)
+    return np.concatenate([e, e[:, ::-1]]).T
+
+def _knn(a, b, k):
+    if not len(a) or not len(b): return np.zeros((2, 0), np.int64)
+    d = np.linalg.norm(a[:, None] - b[None, :], axis=-1)
+    idx = np.argsort(d, axis=1)[:, :min(k, len(b))]
+    return np.stack([np.repeat(np.arange(len(a)), idx.shape[1]), idx.reshape(-1)], 0)
+
+class AV2GNNForecastingDataset(Dataset):
+    """Dataset using local maps and converting to the focal agent’s local coordinate frame."""
+    def __init__(self, root: str | Path, split="train",
+                 obs_sec=7, fut_sec=4, hz=10.0,
+                 max_agents=128, max_lanes=256, max_pts=40,
+                 agent_radius=30.0, knn_lanes=3):
+        self.root = Path(root)
+        self.split = split
+        self.obs_len = int(obs_sec * hz)
+        self.pred_len = int(fut_sec * hz)
+        self.dt = 1.0 / hz
+        self.max_agents, self.max_lanes, self.max_pts = max_agents, max_lanes, max_pts
+        self.agent_radius, self.knn_lanes = agent_radius, knn_lanes
+
+        self.scene_dirs = sorted((self.root / split).iterdir())
+        self.scene_dirs = [d for d in self.scene_dirs if d.is_dir()]
+        if not self.scene_dirs:
+            raise FileNotFoundError(f"No scenario folders found in {split}")
+
+    def __len__(self): return len(self.scene_dirs)
+
+    def __getitem__(self, i: int) -> Dict[str, torch.Tensor]:
+        scenedir = self.scene_dirs[i]
+        parquet = next(scenedir.glob("*.parquet"))
+        map_json = next(scenedir.glob("log_map_archive_*.json"))
+
+        scenario = load_argoverse_scenario_parquet(parquet)
+        amap = ArgoverseStaticMap.from_json(map_json)
+
+        # ---------- Agents ----------
+        agents, futs, fmask, types = [], [], [], []
+        focal_track_id = scenario.focal_track_id
+
+        # gather reference (ego) pose
+        ref_pos, ref_heading = None, 0.0
+
+        for tr in scenario.tracks:
+            states = sorted(tr.object_states, key=lambda s: s.timestep)
+            if not states: 
+                continue
+            if tr.object_type.value == "UNKNOWN":
+                continue
+            xs, ys = np.array([s.position[0] for s in states]), np.array([s.position[1] for s in states])
+            vx, vy = np.array([s.velocity[0] for s in states]), np.array([s.velocity[1] for s in states])
+            hd = _angle_wrap(np.array([s.heading for s in states]))
+            seq = np.stack([xs, ys, vx, vy, hd], 1)
+
+            if tr.track_id == focal_track_id:
+                ref_pos = seq[min(len(seq), self.obs_len) - 1, :2].copy()
+                ref_heading = seq[min(len(seq), self.obs_len) - 1, 4].copy()
+
+            obs, fut = seq[:self.obs_len], seq[self.obs_len:self.obs_len+self.pred_len]
+            mask = np.zeros(self.pred_len, np.float32); mask[:len(fut)] = 1
+            agents.append(_pad(obs, self.obs_len)); futs.append(_pad(fut[:, :2], self.pred_len)); fmask.append(mask)
+            types.append(AV2_DYNAMIC_CLASSES.get(tr.object_type.value, 9))
+
+        # if no focal found, just use mean position as fallback
+        if ref_pos is None:
+            ref_pos = np.mean([a[-1, :2] for a in agents], axis=0)
+            ref_heading = 0.0
+
+        # ---------- Apply local coordinate transform ----------
+        c, s = np.cos(-ref_heading), np.sin(-ref_heading)
+        R = np.array([[c, -s], [s, c]])
+
+        def transform_xy(xy): return (xy - ref_pos) @ R.T
+
+        # transform agent histories and futures
+        for a in agents:
+            a[:, :2] = transform_xy(a[:, :2])
+        for f in futs:
+            f[:, :2] = transform_xy(f[:, :2])
+
+        A = min(len(agents), self.max_agents)
+        agent_hist = np.pad(np.stack(agents[:A]), ((0, self.max_agents - A), (0, 0), (0, 0)))
+        agent_pos_T = agent_hist[:, -1, :2]
+        edge_aa = _radius_graph(agent_pos_T[:A], self.agent_radius)
+
+        # ---------- Map (lanes in local frame) ----------
+        lane_ids = amap.get_scenario_lane_segment_ids()[:self.max_lanes]
+        lane_nodes, lane_centroids, topo = [], [], []
+        for lid in lane_ids:
+            cl = amap.get_lane_segment_centerline(lid)[:, :2]
+            cl = transform_xy(cl)  # transform to local frame
+            if len(cl) > self.max_pts:
+                cl = cl[np.linspace(0, len(cl)-1, self.max_pts, dtype=int)]
+            lane_nodes.append(_pad(cl, self.max_pts))
+            lane_centroids.append(cl.mean(0))
+            for s in amap.get_lane_segment_successor_ids(lid) or []:
+                if s in lane_ids:
+                    topo.append((lane_ids.index(lid), lane_ids.index(s)))
+        L = len(lane_nodes)
+        lane_nodes = np.pad(np.stack(lane_nodes), ((0, self.max_lanes - L), (0, 0), (0, 0)))
+        lane_centroids = np.pad(np.stack(lane_centroids), ((0, self.max_lanes - L), (0, 0)))
+        edge_al = _knn(agent_pos_T[:A], lane_centroids[:L], self.knn_lanes)
+        lane_topo = np.array(topo, int).T if topo else np.zeros((2, 0), int)
+
+        # ---------- Output ----------
+        return {
+            "scenario_id": scenario.scenario_id,
+            "agent_hist": torch.tensor(agent_hist, dtype=torch.float32),
+            "agent_types": torch.tensor(types + [0]*(self.max_agents - len(types)), dtype=torch.int64),
+            "agent_pos_T": torch.tensor(agent_pos_T, dtype=torch.float32),
+            "edge_index_aa": torch.tensor(edge_aa, dtype=torch.int64),
+            "lane_nodes": torch.tensor(lane_nodes, dtype=torch.float32),
+            "lane_topology": torch.tensor(lane_topo, dtype=torch.int64),
+            "edge_index_al": torch.tensor(edge_al, dtype=torch.int64),
+            "fut_traj": torch.tensor(np.pad(np.stack(futs[:A]), ((0, self.max_agents - A), (0, 0), (0, 0))), dtype=torch.float32),
+            "fut_mask": torch.tensor(np.pad(np.stack(fmask[:A]), ((0, self.max_agents - A), (0, 0))), dtype=torch.float32),
+        }
