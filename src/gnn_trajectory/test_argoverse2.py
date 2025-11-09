@@ -11,7 +11,7 @@ import argparse
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 
-from src.gnn_trajectory.data.argoverse2_dataset import AV2GNNForecastingDataset
+from data.argoverse2_dataset import AV2GNNForecastingDataset
 
 
 def parse_args():

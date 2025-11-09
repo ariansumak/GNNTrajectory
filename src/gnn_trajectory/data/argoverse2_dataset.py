@@ -40,7 +40,7 @@ class AV2GNNForecastingDataset(Dataset):
     def __init__(self, root: str | Path, split="train",
                  obs_sec=7, fut_sec=4, hz=10.0,
                  max_agents=128, max_lanes=256, max_pts=40,
-                 agent_radius=30.0, knn_lanes=3):
+                 agent_radius=50, knn_lanes=3):
         self.root = Path(root)
         self.split = split
         candidate = self.root / split
@@ -96,7 +96,9 @@ class AV2GNNForecastingDataset(Dataset):
 
             obs, fut = seq[:self.obs_len], seq[self.obs_len:self.obs_len+self.pred_len]
             mask = np.zeros(self.pred_len, np.float32); mask[:len(fut)] = 1
-            agents.append(_pad(obs, self.obs_len)); futs.append(_pad(fut[:, :2], self.pred_len)); fmask.append(mask)
+            agents.append(_pad(obs, self.obs_len))
+            futs.append(_pad(fut[:, :2], self.pred_len))
+            fmask.append(mask)
             types.append(AV2_DYNAMIC_CLASSES.get(tr.object_type.value, 9))
 
         # if no focal found, just use mean position as fallback
@@ -110,25 +112,47 @@ class AV2GNNForecastingDataset(Dataset):
 
         def transform_xy(xy): return (xy - ref_pos) @ R.T
 
-        # transform agent histories and futures
+        def transform_vel(v): return v @ R.T
+
         for a in agents:
             a[:, :2] = transform_xy(a[:, :2])
+            a[:, 2:4] = transform_vel(a[:, 2:4])
+            a[:, 4] = _angle_wrap(a[:, 4] - ref_heading)
+
         for f in futs:
             f[:, :2] = transform_xy(f[:, :2])
 
+        agent_pos_T_all = np.array([a[-1, :2] for a in agents])
+        dists = np.linalg.norm(agent_pos_T_all, axis=1)        # distance from focal (now at origin)
+        keep = dists < self.agent_radius                       # within radius in local frame
+
+        agents = [agents[i] for i in range(len(agents)) if keep[i]]
+        futs    = [futs[i]   for i in range(len(futs))   if keep[i]]
+        fmask   = [fmask[i]  for i in range(len(fmask))  if keep[i]]
+        types   = [types[i]  for i in range(len(types))  if keep[i]]
+
         A = min(len(agents), self.max_agents)
+        if A == 0:
+            raise ValueError(f"No agents within {self.agent_radius} m in scenario {scenario.scenario_id}")
+
         agent_hist = np.pad(np.stack(agents[:A]), ((0, self.max_agents - A), (0, 0), (0, 0)))
         agent_pos_T = agent_hist[:, -1, :2]
         edge_aa = _radius_graph(agent_pos_T[:A], self.agent_radius)
 
         # ---------- Map (lanes in local frame) ----------
         lane_ids = amap.get_scenario_lane_segment_ids()[:self.max_lanes]
-        lane_nodes, lane_centroids, topo = [], [], []
+        lane_nodes, lane_centroids, topo, lane_lengths  = [], [], [], []
         for lid in lane_ids:
             cl = amap.get_lane_segment_centerline(lid)[:, :2]
             cl = transform_xy(cl)  # transform to local frame
-            if len(cl) > self.max_pts:
-                cl = cl[np.linspace(0, len(cl)-1, self.max_pts, dtype=int)]
+
+            lane_len = len(cl)
+
+            if lane_len > self.max_pts:
+                cl = cl[np.linspace(0, lane_len - 1, self.max_pts, dtype=int)]
+                lane_len = self.max_pts  # cap to max_pts
+
+            lane_lengths.append(lane_len)
             lane_nodes.append(_pad(cl, self.max_pts))
             lane_centroids.append(cl.mean(0))
             for s in amap.get_lane_segment_successor_ids(lid) or []:
@@ -150,6 +174,7 @@ class AV2GNNForecastingDataset(Dataset):
             "lane_nodes": torch.tensor(lane_nodes, dtype=torch.float32),
             "lane_topology": torch.tensor(lane_topo, dtype=torch.int64),
             "edge_index_al": torch.tensor(edge_al, dtype=torch.int64),
+            "lane_lengths": torch.tensor(lane_lengths, dtype=torch.int64),
             "fut_traj": torch.tensor(np.pad(np.stack(futs[:A]), ((0, self.max_agents - A), (0, 0), (0, 0))), dtype=torch.float32),
             "fut_mask": torch.tensor(np.pad(np.stack(fmask[:A]), ((0, self.max_agents - A), (0, 0))), dtype=torch.float32),
         }
