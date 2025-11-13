@@ -180,6 +180,8 @@ class AV2GNNForecastingDataset(Dataset):
             "lane_lengths": torch.tensor(lane_lengths, dtype=torch.int64),
             "fut_traj": torch.tensor(np.pad(np.stack(futs[:A]), ((0, self.max_agents - A), (0, 0), (0, 0))), dtype=torch.float32),
             "fut_mask": torch.tensor(np.pad(np.stack(fmask[:A]), ((0, self.max_agents - A), (0, 0))), dtype=torch.float32),
+            "num_agents": torch.tensor([A]),
+            "num_lanes": torch.tensor([L]),
         }
 
 

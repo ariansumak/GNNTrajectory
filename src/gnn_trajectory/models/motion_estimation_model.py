@@ -7,13 +7,98 @@ from gnn_trajectory.models.decoder_mlp import MLPDisplacementDecoder
 from gnn_trajectory.models.encoder_gat import MotionEncoder
 from gnn_trajectory.models.encoder_gcn import MotionEncoderGCN
 
+from gnn_trajectory.models.encoder_gat_v2 import MotionEncoder as MotionEncoderGATv2
+from gnn_trajectory.models.encoder_gcn_v2 import MotionEncoderGCN as MotionEncoderGCNv2
+
 from gnn_trajectory.data.argoverse2_dataset import AV2GNNForecastingDataset
+
+def collate_fn(batch):
+    """
+    Batch list of scenario dictionaries into one batched dict.
+    """
+
+    agent_offset = 0
+    lane_offset = 0
+
+    out = {
+        "agent_hist": [],
+        "agent_pos_T": [],
+        "edge_index_aa": [],
+        "edges_length": [],
+        "lane_nodes": [],
+        "edge_index_al": [],
+        "batch_agent": [],
+        "batch_lane": [],
+        "fut_traj": [],
+        "fut_mask": [],
+        "focal_indices": [],
+    }
+
+    for scenario_idx, data in enumerate(batch):
+        # Ensure ints
+        A = int(data["num_agents"])
+        L = int(data["num_lanes"])
+
+        # slice to real agents / lanes (drop padded)
+        agent_hist = data["agent_hist"][:A]
+        agent_pos_T = data["agent_pos_T"][:A]
+        fut_traj    = data["fut_traj"][:A]
+        fut_mask    = data["fut_mask"][:A]
+        lane_nodes  = data["lane_nodes"][:L]
+
+        # agents
+        out["agent_hist"].append(agent_hist)
+        out["agent_pos_T"].append(agent_pos_T)
+        out["fut_traj"].append(fut_traj)
+        out["fut_mask"].append(fut_mask)
+
+        # batch vectors
+        out["batch_agent"].append(torch.full((A,), scenario_idx, dtype=torch.long))
+        out["batch_lane"].append(torch.full((L,), scenario_idx, dtype=torch.long))
+
+        # edges agent-agent (offset nodes within global agent space)
+        ei_aa = data["edge_index_aa"] + agent_offset
+        out["edge_index_aa"].append(ei_aa)
+        out["edges_length"].append(data["edges_length"])
+
+        # edges agent-lane (offset both sides into global agent/lane spaces)
+        ei_al = data["edge_index_al"].clone()  # (2, E)
+        ei_al[0] += agent_offset   # agents
+        ei_al[1] += lane_offset    # lanes
+        out["edge_index_al"].append(ei_al)
+
+        # lane nodes
+        out["lane_nodes"].append(lane_nodes)
+
+        # record focal agent index (global)
+        focal_idx_local = torch.argmin(torch.norm(agent_pos_T, dim=1)).item()
+        out["focal_indices"].append(focal_idx_local + agent_offset)
+
+        # update offsets by REAL counts
+        agent_offset += A
+        lane_offset  += L
+
+    # concatenate all lists
+    for k in ["agent_hist", "agent_pos_T", "fut_traj", "fut_mask"]:
+        out[k] = torch.cat(out[k], dim=0)
+
+    out["edge_index_aa"] = torch.cat(out["edge_index_aa"], dim=1)
+    out["edges_length"]  = torch.cat(out["edges_length"], dim=0)
+    out["edge_index_al"] = torch.cat(out["edge_index_al"], dim=1)
+    out["lane_nodes"]    = torch.cat(out["lane_nodes"], dim=0)
+    out["batch_agent"]   = torch.cat(out["batch_agent"], dim=0)
+    out["batch_lane"]    = torch.cat(out["batch_lane"], dim=0)
+
+    # focal_indices: one per scenario
+    out["focal_indices"] = torch.tensor(out["focal_indices"], dtype=torch.long)
+
+    return out
 
 class MotionForecastModel(nn.Module):
     def __init__(self, encoder_cfg=None, decoder_cfg=None):
         super().__init__()
         #self.encoder = MotionEncoder(**(encoder_cfg or {}))
-        self.encoder = MotionEncoderGCN(**(encoder_cfg or {}))
+        self.encoder = MotionEncoderGCNv2(**(encoder_cfg or {}))
         #self.decoder = MotionDecoder(**(decoder_cfg or {}))
         self.decoder = MLPDisplacementDecoder(**(decoder_cfg or {}))
         
@@ -25,15 +110,13 @@ class MotionForecastModel(nn.Module):
         agent_pos_T = batch["agent_pos_T"]
 
         # Find focal agent (closest to origin)
-        dists = torch.norm(agent_pos_T, dim=1)
-        focal_idx = torch.argmin(dists).item()
-        focal_feat = agent_map[focal_idx].unsqueeze(0)
-        start_pos = agent_pos_T[focal_idx].unsqueeze(0)
+        focal_indices = batch["focal_indices"]   # shape: (B,)
+        focal_feat = agent_map[focal_indices]    # (B, H)
+        start_pos = agent_pos_T[focal_indices]   # (B, 2)
 
         # Decode trajectory
         pred_traj = self.decoder(focal_feat, start_pos=start_pos)
-        return pred_traj, focal_idx
-
+        return pred_traj, focal_indices
 
 # ------------------------------------------------------------
 # Main: test run
@@ -41,10 +124,9 @@ class MotionForecastModel(nn.Module):
 def main():
     root = Path("/home/silviu/Documents/Workspace/DeepLearning/Project/av2-api")
     dataset = AV2GNNForecastingDataset(root=root, split="val")
-    sample1 = dataset[0]
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
-    sample2 = next(iter(dataloader))
-    print(f"Loaded scenario: {sample['scenario_id']}")
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=2, shuffle=False, collate_fn=collate_fn)
+    sample = next(iter(dataloader))
+    #print(f"Loaded scenario: {sample['scenario_id']}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     sample = {k: v.to(device) if torch.is_tensor(v) else v for k, v in sample.items()}
