@@ -24,10 +24,12 @@ def _pad(arr, t, axis=0): return np.pad(arr, [(0, max(0, t - arr.shape[axis]))] 
 def _radius_graph(x, r):
     N = len(x)
     edges = [(i, j) for i in range(N) for j in range(i + 1, N) if np.linalg.norm(x[i] - x[j]) < r]
+    edges_length = [np.linalg.norm(x[i] - x[j]) for i in range(N) for j in range(i + 1, N) if np.linalg.norm(x[i] - x[j]) < r]
+    edges_length = np.array(edges_length, dtype=float)
     if not edges: 
         return np.zeros((2, 0), np.int64)
     e = np.array(edges)
-    return np.concatenate([e, e[:, ::-1]]).T
+    return np.concatenate([e, e[:, ::-1]]).T, np.concatenate([edges_length, edges_length], axis=0)
 
 def _knn(a, b, k):
     if not len(a) or not len(b): return np.zeros((2, 0), np.int64)
@@ -137,7 +139,7 @@ class AV2GNNForecastingDataset(Dataset):
 
         agent_hist = np.pad(np.stack(agents[:A]), ((0, self.max_agents - A), (0, 0), (0, 0)))
         agent_pos_T = agent_hist[:, -1, :2]
-        edge_aa = _radius_graph(agent_pos_T[:A], self.agent_radius)
+        edge_aa, edges_length = _radius_graph(agent_pos_T[:A], self.agent_radius)
 
         # ---------- Map (lanes in local frame) ----------
         lane_ids = amap.get_scenario_lane_segment_ids()[:self.max_lanes]
@@ -171,6 +173,7 @@ class AV2GNNForecastingDataset(Dataset):
             "agent_types": torch.tensor(types + [0]*(self.max_agents - len(types)), dtype=torch.int64),
             "agent_pos_T": torch.tensor(agent_pos_T, dtype=torch.float32),
             "edge_index_aa": torch.tensor(edge_aa, dtype=torch.int64),
+            "edges_length": torch.tensor(edges_length, dtype=torch.float32),
             "lane_nodes": torch.tensor(lane_nodes, dtype=torch.float32),
             "lane_topology": torch.tensor(lane_topo, dtype=torch.int64),
             "edge_index_al": torch.tensor(edge_al, dtype=torch.int64),
