@@ -50,7 +50,7 @@ class ModelConfig:
 @dataclass
 class TrainingConfig:
     epochs: int = 1
-    learning_rate: float = 1e-3
+    learning_rate: float = 1e-4
     grad_clip: float | None = None
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     log_every: int = 50

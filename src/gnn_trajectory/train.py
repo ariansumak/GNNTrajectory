@@ -167,6 +167,15 @@ def run_experiment(config: ExperimentConfig | None = None) -> None:
 
     seed_everything(42)
 
+    cfg_dict = cfg.to_dict()
+    print("[config] Experiment hyperparameters:")
+    for section, values in cfg_dict.items():
+        if values is None:
+            continue
+        print(f"  {section}:")
+        for key, value in values.items():
+            print(f"    {key}: {value}")
+
     train_loader = _build_dataloader(cfg, cfg.data.split, shuffle=True)
     val_loader = None
     if cfg.data.val_split:
