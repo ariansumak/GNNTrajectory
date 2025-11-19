@@ -20,7 +20,7 @@ try:
 except ImportError:  # pragma: no cover
     SummaryWriter = None  # type: ignore
 
-from gnn_trajectory.config import ExperimentConfig
+from gnn_trajectory.config import ExperimentConfig, LRSchedulerConfig
 from gnn_trajectory.data import AV2GNNForecastingDataset
 from gnn_trajectory.losses import masked_l2_loss
 from gnn_trajectory.metrics import (
@@ -157,6 +157,29 @@ def _maybe_create_writer(cfg: ExperimentConfig) -> SummaryWriter | None:
     return SummaryWriter(log_dir=str(log_dir))
 
 
+def _create_scheduler(
+    optimizer: torch.optim.Optimizer, scheduler_cfg: LRSchedulerConfig | None
+) -> torch.optim.lr_scheduler.ReduceLROnPlateau | None:
+    if scheduler_cfg is None:
+        return None
+    if scheduler_cfg.type != "plateau":
+        raise ValueError(f"Unsupported scheduler type '{scheduler_cfg.type}'")
+    print(
+        f"[scheduler] ReduceLROnPlateau factor={scheduler_cfg.factor} "
+        f"patience={scheduler_cfg.patience} min_lr={scheduler_cfg.min_lr}"
+    )
+    return torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=scheduler_cfg.factor,
+        patience=scheduler_cfg.patience,
+        threshold=scheduler_cfg.threshold,
+        cooldown=scheduler_cfg.cooldown,
+        min_lr=scheduler_cfg.min_lr,
+        verbose=scheduler_cfg.verbose,
+    )
+
+
 def run_experiment(config: ExperimentConfig | None = None) -> None:
     """
     Assemble data loaders, instantiate the model, and launch training.
@@ -199,6 +222,7 @@ def run_experiment(config: ExperimentConfig | None = None) -> None:
     )
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.training.learning_rate)
+    scheduler = _create_scheduler(optimizer, cfg.training.lr_scheduler)
     cfg.training.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     metrics = {
@@ -212,6 +236,8 @@ def run_experiment(config: ExperimentConfig | None = None) -> None:
     for epoch in range(1, cfg.training.epochs + 1):
         print(f"[epoch] starting epoch {epoch}/{cfg.training.epochs}")
         model.train()
+        epoch_loss_total = 0.0
+        epoch_steps = 0
         for batch in train_loader:
             batch = _move_batch_to_device(batch, device)
             preds, _ = model(batch)
@@ -224,6 +250,8 @@ def run_experiment(config: ExperimentConfig | None = None) -> None:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.training.grad_clip)
             optimizer.step()
             global_step += 1
+            epoch_loss_total += loss.item()
+            epoch_steps += 1
 
             if global_step % cfg.training.log_every == 0:
                 metric_values = _compute_metrics(metrics, preds, targets, mask)
@@ -241,6 +269,11 @@ def run_experiment(config: ExperimentConfig | None = None) -> None:
                 writer.add_scalar("val/loss", val_loss, epoch)
                 for name, value in val_metrics.items():
                     writer.add_scalar(f"val/{name}", value, epoch)
+            if scheduler is not None:
+                scheduler.step(val_loss)
+        elif scheduler is not None and epoch_steps > 0:
+            avg_train_loss = epoch_loss_total / epoch_steps
+            scheduler.step(avg_train_loss)
 
     if writer:
         writer.close()

@@ -4,15 +4,15 @@ Central configuration schemas for experiments plus helper loaders.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict
 
 import torch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DATA_ROOT = Path.home() / "data"
-
+#DEFAULT_DATA_ROOT = Path.home() / "data"
+DEFAULT_DATA_ROOT = "/home/arian-sumak/Documents/DTU/Deep Learning"
 
 def _to_path(value: Any) -> Path | None:
     if value is None or isinstance(value, Path):
@@ -48,6 +48,17 @@ class ModelConfig:
 
 
 @dataclass
+class LRSchedulerConfig:
+    type: str = "plateau"
+    factor: float = 0.5
+    patience: int = 5
+    threshold: float = 1e-3
+    cooldown: int = 0
+    min_lr: float = 0.0
+    verbose: bool = True
+
+
+@dataclass
 class TrainingConfig:
     epochs: int = 1
     learning_rate: float = 1e-4
@@ -56,6 +67,7 @@ class TrainingConfig:
     log_every: int = 50
     checkpoint_dir: Path = Path("checkpoints")
     log_dir: Path | None = Path("runs")
+    lr_scheduler: LRSchedulerConfig | None = None
 
 
 @dataclass
@@ -97,6 +109,10 @@ class ExperimentConfig:
             cfg["checkpoint_dir"] = _to_path(cfg["checkpoint_dir"]) or Path("checkpoints")
         if "log_dir" in cfg:
             cfg["log_dir"] = _to_path(cfg["log_dir"])
+        if "lr_scheduler" in cfg and cfg["lr_scheduler"] is not None:
+            cfg["lr_scheduler"] = LRSchedulerConfig(**cfg["lr_scheduler"])
+        else:
+            cfg["lr_scheduler"] = None
         return TrainingConfig(**cfg)
 
     @classmethod
@@ -123,6 +139,9 @@ class ExperimentConfig:
         training_dict = self.training.__dict__.copy()
         training_dict["checkpoint_dir"] = str(self.training.checkpoint_dir)
         training_dict["log_dir"] = str(self.training.log_dir) if self.training.log_dir else None
+        training_dict["lr_scheduler"] = (
+            asdict(self.training.lr_scheduler) if self.training.lr_scheduler else None
+        )
         model_dict = self.model.__dict__.copy() if self.model else None
         if model_dict:
             model_dict = {k: _serialize(v) for k, v in model_dict.items()}
