@@ -168,16 +168,24 @@ def _create_scheduler(
         f"[scheduler] ReduceLROnPlateau factor={scheduler_cfg.factor} "
         f"patience={scheduler_cfg.patience} min_lr={scheduler_cfg.min_lr}"
     )
-    return torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
+    kwargs = dict(
         mode="min",
         factor=scheduler_cfg.factor,
         patience=scheduler_cfg.patience,
         threshold=scheduler_cfg.threshold,
         cooldown=scheduler_cfg.cooldown,
         min_lr=scheduler_cfg.min_lr,
-        verbose=scheduler_cfg.verbose,
     )
+    try:
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            verbose=scheduler_cfg.verbose,
+            **kwargs,
+        )
+    except TypeError:
+        if scheduler_cfg.verbose:
+            print("[scheduler] ReduceLROnPlateau verbose flag not supported by this torch version.")
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, **kwargs)
 
 
 def run_experiment(config: ExperimentConfig | None = None) -> None:
