@@ -1,6 +1,6 @@
 {
   "data": {
-    "root": "~/data",
+    "root": "/dtu/blackhole/07/224071/dataset",
     "split": "train",
     "val_split": "val",
     "obs_seconds": 7.0,
