@@ -1,157 +1,193 @@
-# Graph Neural Networks for Multi-Agent Trajectory Prediction
+# GNNTrajectory – GNN-based Motion Forecasting Scaffold
 
-Lightweight research scaffold for experimenting with GNN/LSTM-based trajectory forecasting. The repo contains minimal PyTorch code under `src/gnn_trajectory/`, a ready-to-use Argoverse 2 dataset wrapper, and a dummy LSTM encoder/decoder that can be swapped out for richer GNN models. Install the official [Argoverse 2 API](https://github.com/argoverse/av2-api) via `pip` to access the scenario readers used throughout the codebase.
+Minimal PyTorch project for experimenting with multi-agent trajectory forecasting on Argoverse 2. The repository focuses on clear data handling, configurable model pipelines, and reproducible training so you can prototype graph/LSTM architectures quickly.
 
-## Repository layout
+## Repository Layout
+
 ```
 ├── README.md
-├── requirements.txt              # Core Python deps for the scaffold
-├── src/gnn_trajectory            # Config, AV2 dataset, models (LSTM baseline), training script
-├── av2-api/                      # Optional local checkout of the Argoverse 2 API
-├── argoverse1_dataset_processing.py
-└── test_argoverse2.py            # CLI for visualizing AV2 samples with matplotlib
+├── requirements.txt
+├── src/gnn_trajectory
+│   ├── config.py              # Experiment configuration dataclasses
+│   ├── data/                  # AV2 dataset wrappers
+│   ├── losses.py
+│   ├── metrics.py
+│   ├── models/                # Encoders/decoders (LSTM + GNN variants)
+│   ├── train.py               # Training entrypoint
+│   └── utils.py
+├── av2-api/                   # Optional local checkout of Argoverse 2 API
+├── data/                      # Expected location of AV2 splits by default
+└── test_argoverse2.py         # Quick visualization CLI
 ```
 
-Everything in `src/gnn_trajectory` is intentionally lightweight. The default training run simply feeds `AV2GNNForecastingDataset` into a dummy LSTM encoder/linear decoder so you can verify the plumbing and then iterate toward richer GNN architectures.
+## End-to-End Pipeline Overview
 
-## Environment setup
-1. **Clone (with submodule)**
-   ```bash
-   git clone --recurse-submodules <your-fork-url> GNNTrajectory
-   cd GNNTrajectory
-   ```
-   Already cloned without `--recurse-submodules`? Run `git submodule update --init --recursive` once to pull the `av2-api/` sources.
-   To keep the submodule in sync when pulling new commits later:
-   ```bash
-   git pull
-   git submodule update --init --recursive
-   ```
-2. **Python env (example with conda)**
-   ```bash
-   conda create -n gnn-trajectory python=3.10
-   conda activate gnn-trajectory
-   ```
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt        # core scaffold deps
-   pip install av2                        # pulls latest Argoverse 2 API from PyPI
-   # or install straight from GitHub if you need bleeding edge:
-   # pip install "av2 @ git+https://github.com/argoverse/av2-api.git"
-   ```
-   PyTorch Geometric ships platform-specific wheels; if `pip install torch-geometric` fails, follow their [installation guide](https://pytorch-geometric.readthedocs.io/en/latest/install/installation.html).
+1. **Dataset construction** – `AV2GNNForecastingDataset` (`src/gnn_trajectory/data/argoverse2_dataset.py`) reads an AV2 scenario directory (parquet + map JSON), converts agent trajectories and lane graphs into the focal agent’s local frame, and emits a tensor dictionary containing:
+   - Agent histories (`agent_hist`), future targets/masks, agent types.
+   - Agent–agent proximity edges (radius graph) and agent–lane k-NN edges.
+   - Lane nodes/topology sampled from the static map.
+2. **Batching** – `collate_fn` (currently defined next to the model you run) trims padded entries, concatenates agents/lanes across scenarios, updates edge indices with offsets, and records per-scenario `focal_indices` so encoders know the ego target.
+3. **Model** – `MotionForecastModel` consumes the batched graph, encodes agent/map context using whichever encoder you select (GCN/GAT variants), and decodes the focal agent’s trajectory via the configured decoder (MLP displacement head or autoregressive LSTM). Pick combinations directly through `ModelConfig`/JSON without code changes.
+4. **Loss & metrics** – `masked_l2_loss` (`src/gnn_trajectory/losses.py`) computes the training objective with masks for variable-length futures. `metrics.py` provides ADE, FDE, and hit-rate style accuracy.
+5. **Training loop** – `src/gnn_trajectory/train.py`:
+   - Builds PyTorch `DataLoader`s for train (and optional val) splits using `ExperimentConfig.data`.
+   - Seeds reproducibility, creates the model with `ExperimentConfig.model`, and optimizes via Adam.
+   - Logs losses/metrics to stdout and optionally TensorBoard (`TrainingConfig.log_dir`).
+   - Runs validation each epoch when `data.val_split` is set, using the same loss/metric helpers.
+6. **Visualization / inspection** – `test_argoverse2.py` and the dataset module can be invoked to inspect samples or plot trajectories for sanity checks.
 
-   *Already installed `av2` earlier?* As long as the same Python environment is still active, those modules remain available—you only need to reinstall if you created a fresh environment or upgraded Python.
+## Quick Start
 
-## Data preparation
-- The default config already points to the repository’s `data/` directory (resolved absolutely), so you can simply drop your AV2 scenario folders there—either the entire `motion-forecasting` tree or just one split—and the loader will detect whether the path already corresponds to a split.
-- Set `ExperimentConfig.data.root` (see `src/gnn_trajectory/config.py`) to another location if you keep the dataset elsewhere—either the AV2 motion-forecasting root (containing `train/`, `val/`, `test/`) or directly to a single split directory if you only downloaded one of them.
-- The code expects each scenario folder to contain both the parquet file and the matching `log_map_archive_*.json` static map, mirroring the official dataset release.
-- Adjust `obs_seconds`, `fut_seconds`, and `frequency_hz` in `DataConfig` to change the observation/prediction horizons used by the dataset and model.
-
-## Training scaffold
-With the dataset path configured:
 ```bash
+git clone --recurse-submodules <your-fork> GNNTrajectory
+cd GNNTrajectory
+python -m venv .venv && source .venv/bin/activate  # or use conda/mamba
+pip install -r requirements.txt
+pip install av2  # official Argoverse 2 API (needed for scenario/map readers)
+```
+
+Download the Argoverse 2 motion-forecasting dataset and place the split directories under `data/` (default), e.g. `data/train/<scenario_id>/…`. Alternatively set `ExperimentConfig.data.root` to wherever the dataset lives (the code accepts either the split directory itself or the root containing `train/`, `val/`, `test/`).
+
+Launch a baseline training run (two equivalent entry points):
+
+```bash
+# Run as a script, optionally pointing to a JSON config
+python src/gnn_trajectory/train.py --config configs/example_train.json
+
+# Or run as a module (also accepts --config)
 PYTHONPATH=src python -m gnn_trajectory.train
 ```
-What this does:
-- Loads `AV2GNNForecastingDataset` (batch size 1 for now) via the parameters in `DataConfig`.
-- Feeds each scenario to `AgentForecastingModel`, which bundles the `DummyLSTMEncoder` with a small MLP that regresses future xy coordinates for every agent.
-- Optimizes a masked L2 loss (only valid future steps contribute) and logs ADE/FDE metrics computed with the same mask.
 
-To swap in a different encoder/decoder, modify `AgentForecastingModel` (or create a new module) and rewire `train.py` accordingly—the built-in training loop already handles masked losses/metrics and automatic device placement.
+Both commands pick up the defaults in `ExperimentConfig` unless you pass `--config path/to/config.json`. Logs stream to stdout; TensorBoard scalars are stored in `runs/` if `tensorboard` is installed (`tensorboard --logdir runs` to visualize curves).
 
-## LSTM encoder basics
-The standalone LSTM encoder in `src/gnn_trajectory/models/lstm_encoder.py` is a convenience wrapper that can ingest either:
-1. A batch dictionary produced by `AV2GNNForecastingDataset` (requires at least `agent_hist` shaped `(max_agents, obs_len, feat_dim)` and optionally `fut_mask` for filtering padded agents).
-2. A raw tensor (`dummy_inputs`) shaped `(num_agents, obs_len, feature_dim)`—useful for quick experiments independent of any dataset.
+## Configuration & Customization
 
-Usage patterns:
-```python
-from gnn_trajectory.models.lstm_encoder import DummyLSTMEncoder
+### JSON config files
 
-encoder = DummyLSTMEncoder()
-sample = av2_dataset[0]
-embeddings = encoder(batch=sample)                 # returns (num_valid_agents, hidden_dim)
+`src/gnn_trajectory/train.py` accepts `--config path/to/config.json`. See `configs/example_train.json` for the schema (nested `data`, `model`, `training` blocks mirroring the dataclasses). Override only the keys you need; unspecified fields fall back to their defaults.
 
-dummy = torch.randn(4, 70, 5)                      # agents, timesteps, features
-embeddings = encoder(dummy_inputs=dummy)           # same encoder, pure synthetic data
+Example snippet:
+
+```json
+{
+  "data": {
+    "root": "/datasets/av2",
+    "split": "train",
+    "val_split": "val"
+  },
+  "model": {
+    "encoder": "gat_v2",
+    "decoder": "lstm",
+    "encoder_kwargs": {
+      "lstm_hidden": 96,
+      "gcn_hidden": 96,
+      "gcn_layers": 3
+    },
+    "decoder_kwargs": {
+      "hidden_dim": 96,
+      "num_layers": 2
+    }
+  },
+  "training": {
+    "epochs": 10,
+    "learning_rate": 0.0005,
+    "log_dir": "runs/exp1"
+  }
+}
 ```
 
-The helper script `scripts/demo_lstm_encoder.py` demonstrates mode (2) end-to-end:
+Then run:
+
 ```bash
-PYTHONPATH=src python scripts/demo_lstm_encoder.py \
-  --agents 4 --timesteps 70 --features 5 --hidden-dim 128 --layers 1
+python src/gnn_trajectory/train.py --config configs/exp1.json
 ```
-Output shows the `(agents, hidden_dim)` embedding tensor so you can verify shapes before integrating the encoder into larger models.
 
-## Visualization with `AV2GNNForecastingDataset`
-Use the custom dataset in `src/gnn_trajectory/data/argoverse2_dataset.py` (authored for local visualization) whenever you want to work with Argoverse scenes directly inside notebooks or scripts. It expects the standard folder structure:
-```
-/path/to/av2/motion-forecasting/
-    train/
-        <scenario-id>/
-            scenario_<scenario-id>.parquet
-            log_map_archive_<scenario-id>.json
-    val/
-    test/
-```
-If you only downloaded a single split (e.g., just `train/`), pass the split directory itself as `root` and the loader will pick it up automatically.
+### Architecture combinations
 
-Quick Python usage:
+`motion_estimation_model.MotionForecastModel` exposes multiple encoder/decoder families. In JSON configs (and the `ModelConfig` dataclass) you can set:
+
+- `model.encoder`: choose from `gcn_v2`, `gat_v2`, `gcn`, `gat`.
+- `model.decoder`: choose from `mlp` or `lstm`.
+- `model.encoder_kwargs`: extra keyword args passed to the encoder constructor (e.g., `lstm_hidden`, `gcn_hidden`, `gcn_layers`).
+- `model.decoder_kwargs`: keyword args for the decoder (e.g., `hidden_dim`, `num_layers`). When `pred_len` is omitted it automatically matches the configured future horizon.
+
+Mix and match values in your config file to explore different GNN/backbone pairings without touching code.
+
+### Programmatic configuration
+
+Prefer Python-level control? Import the dataclasses directly:
 
 ```python
 from pathlib import Path
-from src.gnn_trajectory.data.argoverse2_dataset import AV2GNNForecastingDataset
+from gnn_trajectory.config import ExperimentConfig
+from gnn_trajectory.train import run_experiment
 
-dataset = AV2GNNForecastingDataset(
-    root=Path("data"),                                  # replace if your dataset lives elsewhere
-    split="val",                                       # ignored when `root` already points to the split dir
-    obs_sec=7,
-    fut_sec=4,
-    hz=10.0,
-)
-sample = dataset[0]
-print(sample["scenario_id"])
-print(sample["agent_hist"].shape)  # (max_agents, obs_len, 5)
-# feed `sample` into DummyLSTMEncoder or the provided matplotlib helper.
+cfg = ExperimentConfig()
+cfg.data.root = Path("/data/av2/motion-forecasting")
+cfg.data.split = "train"
+cfg.data.val_split = "val"      # leave as None if you only have train
+cfg.data.obs_seconds = 7.0
+cfg.data.fut_seconds = 4.0
+cfg.training.epochs = 10
+cfg.training.learning_rate = 5e-4
+cfg.training.log_every = 20
+cfg.training.log_dir = Path("runs/custom")
+run_experiment(cfg)
 ```
 
-Command-line helper:
-```bash
-python -m src.gnn_trajectory.data.argoverse2_dataset \
-  --root data \
-  --split val \
-  --index 0
+Key fields:
 
-python test_argoverse2.py \
-  --root data \
-  --split val \
-  --num 1 \
-  --vis         # add this flag to render the local-frame trajectories + lanes
-```
-`test_argoverse2.py` instantiates `AV2GNNForecastingDataset`, prints tensor shapes, and (optionally) uses matplotlib to draw agent histories/futures over the local lane graph—handy for verifying your installation and the friend-provided visualization workflow.
+- `DataConfig`
+  - `root`: dataset directory (split or root containing multiple splits).
+  - `split` / `val_split`: names of subdirectories under `root`; set `val_split=None` for train-only.
+  - Temporal/spatial limits: `obs_seconds`, `fut_seconds`, `frequency_hz`, `max_agents`, `max_lanes`, `max_lane_points`, `agent_radius`, `lane_knn`.
+  - `batch_size` (collated with graph offsets, so >1 is now supported) and `num_workers`.
+- `ModelConfig`
+  - `history_steps` / `future_steps` get derived from the data config.
+  - `encoder` / `decoder`: picks from the registries described above.
+  - `encoder_kwargs` / `decoder_kwargs`: dicts forwarded to those constructors.
+- `TrainingConfig`
+  - `epochs`, `learning_rate`, `grad_clip`, `device`.
+  - `log_every`: frequency (in optimizer steps) for printing/logging train metrics.
+  - `log_dir`: set to `None` to disable TensorBoard; otherwise events go under the specified directory.
+  - `checkpoint_dir`: target folder for saving checkpoints (hook this up when you add checkpointing).
 
-The dataset output dictionary includes:
-- `agent_hist`: local-frame xy/vx/vy/heading histories shaped `(max_agents, obs_len, 5)`.
-- `fut_traj` / `fut_mask`: future targets and validity mask.
-- `edge_index_aa`: agent-agent proximity graph (radius graph).
-- `edge_index_al` + `lane_nodes` + `lane_topology`: lane geometry and connectivity for map-conditioned models.
+### Switching Architectures
 
-Wire these tensors into `DummyLSTMEncoder`, your GNN layers, or custom plotting utilities as needed.
+- **Simple swap** – adjust `model.encoder`, `model.decoder`, and their `*_kwargs` entries in your config JSON. The registries in `motion_estimation_model.py` map strings to classes (`gat_v2`, `gcn_v2`, etc.), so you can flip between combinations without code edits.
+- **New model class** – create `src/gnn_trajectory/models/my_model.py` that consumes the collated batch dict, then update `train.py` to instantiate it instead of `MotionForecastModel`. Keep the contract (`pred_traj, focal_idx = model(batch)`) so losses and metrics keep functioning.
+- **Different batching** – if you want a radically different data layout, implement another `collate_fn` and pass it to `_build_dataloader`. The provided collate already handles multi-scenario batches with graph index offsets, so you only need to change it for non-standard batching strategies.
 
-## Visualization tools (official `av2` package)
-Installing `av2` via `pip` also gives you the official CLI utilities. For example:
-```bash
-python -m av2.tutorials.generate_forecasting_scenario_visualizations \
-  --argoverse-scenario-dir /path/to/av2/motion-forecasting/scenarios/val \
-  --viz-output-dir ./viz_outputs \
-  --num-scenarios 25 \
-  --selection-criteria random
-```
-The module path mirrors the GitHub tutorials folder and relies on the same dependencies (click, joblib, rich, ffmpeg). Use `python -m av2.tutorials.<script_name> --help` to discover other renderers such as sensor dataset or ego-view overlays.
+## Evaluation & Metrics
 
-## Next steps
-- Extend `AgentForecastingModel` with graph-based interactions (e.g., swap in `InteractionNetwork` from `models/gnn.py`) or a better decoder.
-- Implement smarter batching so multiple scenarios can be processed together (the current loader enforces `batch_size=1` because edge counts vary).
-- Enrich the training loop with validation splits, checkpoints, and experiment tracking once you have a stable dataset path.
-- Automate visualization or evaluation jobs (e.g., logging rendered trajectories per epoch) using the dataset utilities above.
+Metrics live in `src/gnn_trajectory/metrics.py`:
+
+- `average_displacement_error` (ADE)
+- `final_displacement_error` (FDE)
+- `make_hit_rate_metric(threshold)` – yields final displacement hit-rate at a given threshold (default 2 m in the training loop).
+
+Add your own functions in the same file (accepting `pred, target, mask`) and register them in the `metrics` dict inside `train.py`. They will automatically be computed/logged during training and validation.
+
+Validation is optional: when `cfg.data.val_split` is set, `train.py` builds a validation loader and runs `_evaluate` after each epoch, logging averaged loss/metrics with a `val/` prefix (also written to TensorBoard when enabled). Leave `val_split=None` if you only have the train dataset.
+
+## Visualization / Sanity Checks
+
+- `test_argoverse2.py` – CLI that samples from `AV2GNNForecastingDataset`, prints tensor shapes, and can plot local-frame trajectories plus lane graphs (`--vis` flag).
+- `scripts/demo_lstm_encoder.py` – runs the LSTM encoder on synthetic data to confirm shapes.
+- Official AV2 visualizers – once `av2` is installed, explore `python -m av2.tutorials.*` scripts to render motion-forecasting scenarios.
+
+## Extending the Project
+
+- **GNN encoders** – leverage `MotionEncoderGCN`, `MotionEncoderGAT`, or create new graph layers for agent-map interactions.
+- **Better decoders** – integrate multi-modal prediction heads, mixture density networks, or trajectory sampling decoders.
+- **Evaluation** – add forecasting benchmarks (minADE/minFDE across K samples, negative log-likelihood, etc.) as new metrics.
+- **Experiment tracking** – integrate Weights & Biases or other loggers by swapping `_log_metrics`/TensorBoard calls.
+- **Checkpoints** – save `model.state_dict()` and optimizer state in `checkpoint_dir` at desired intervals or when validation improves.
+
+## Troubleshooting
+
+- `ModuleNotFoundError: gnn_trajectory…` – ensure you run scripts with `PYTHONPATH=src` or install the package (`pip install -e .` if you add a `pyproject.toml`).
+- Missing AV2 dataset files – the dataset loader expects each scenario folder to contain both the parquet and `log_map_archive_*.json`. Double-check your download.
+- TensorBoard not installed – the training script gracefully disables TB logging when `tensorboard` isn’t available. `pip install tensorboard` to enable curves.
+
+Happy experimenting! Open issues/PRs to contribute new encoders, datasets, or training utilities.

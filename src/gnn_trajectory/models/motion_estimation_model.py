@@ -6,11 +6,20 @@ from gnn_trajectory.models.decoder import MotionDecoder
 from gnn_trajectory.models.decoder_mlp import MLPDisplacementDecoder
 from gnn_trajectory.models.encoder_gat import MotionEncoder
 from gnn_trajectory.models.encoder_gcn import MotionEncoderGCN
-
 from gnn_trajectory.models.encoder_gat_v2 import MotionEncoder as MotionEncoderGATv2
 from gnn_trajectory.models.encoder_gcn_v2 import MotionEncoderGCN as MotionEncoderGCNv2
 
 from gnn_trajectory.data.argoverse2_dataset import AV2GNNForecastingDataset
+
+ENCODER_REGISTRY = {
+    "gat": MotionEncoder,
+    "gcn_v2": MotionEncoderGCNv2,
+}
+
+DECODER_REGISTRY = {
+    "lstm": MotionDecoder,
+    "mlp": MLPDisplacementDecoder,
+}
 
 def collate_fn(batch):
     """
@@ -95,13 +104,22 @@ def collate_fn(batch):
     return out
 
 class MotionForecastModel(nn.Module):
-    def __init__(self, encoder_cfg=None, decoder_cfg=None):
+    def __init__(self, encoder_name="gcn_v2", decoder_name="mlp", encoder_cfg=None, decoder_cfg=None, future_steps=None):
         super().__init__()
-        #self.encoder = MotionEncoder(**(encoder_cfg or {}))
-        self.encoder = MotionEncoderGCNv2(**(encoder_cfg or {}))
-        #self.decoder = MotionDecoder(**(decoder_cfg or {}))
-        self.decoder = MLPDisplacementDecoder(**(decoder_cfg or {}))
-        
+        encoder_cls = ENCODER_REGISTRY.get(encoder_name)
+        if encoder_cls is None:
+            raise ValueError(f"Unknown encoder '{encoder_name}'. Options: {list(ENCODER_REGISTRY.keys())}")
+        decoder_cls = DECODER_REGISTRY.get(decoder_name)
+        if decoder_cls is None:
+            raise ValueError(f"Unknown decoder '{decoder_name}'. Options: {list(DECODER_REGISTRY.keys())}")
+
+        encoder_cfg = dict(encoder_cfg or {})
+        decoder_cfg = dict(decoder_cfg or {})
+        if future_steps is not None and "pred_len" not in decoder_cfg:
+            decoder_cfg["pred_len"] = future_steps
+
+        self.encoder = encoder_cls(**encoder_cfg)
+        self.decoder = decoder_cls(**decoder_cfg)
 
     def forward(self, batch):
         # Encode the scene
@@ -122,8 +140,8 @@ class MotionForecastModel(nn.Module):
 # Main: test run
 # ------------------------------------------------------------
 def main():
-    root = Path("/home/silviu/Documents/Workspace/DeepLearning/Project/av2-api")
-    dataset = AV2GNNForecastingDataset(root=root, split="val")
+    root = Path("/home/arian-sumak/Documents/DTU/Deep Learning")
+    dataset = AV2GNNForecastingDataset(root=root, split="train")
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=2, shuffle=False, collate_fn=collate_fn)
     sample = next(iter(dataloader))
     #print(f"Loaded scenario: {sample['scenario_id']}")

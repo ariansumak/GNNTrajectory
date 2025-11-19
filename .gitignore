@@ -8,3 +8,7 @@ __pycache__/
 outputs/
 checkpoints/
 /av2-api
+/runs
+/checkpoints
+/src/gnn_trajectory/runs
+/src/gnn_trajectory/checkpoints
