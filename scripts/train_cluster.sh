@@ -40,6 +40,10 @@ fi
 source "/dtu/blackhole/07/224071/GNNenv/bin/activate"
 module load cuda/12.8.1
 
-cd "$HOME/code/GNNTrajectory"
+# ⬇️ IMPORTANT: go to the repo root on blackhole
+cd /dtu/blackhole/07/224071/GNNTrajectory
 
-PYTHONPATH=src python src/gnn_trajectory/train.py --config configs/cluster_train.json
+# Run training from repo root
+export PYTHONPATH=src
+python src/gnn_trajectory/train.py --config configs/cluster_train.json
+
