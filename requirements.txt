@@ -5,6 +5,7 @@ aiosignal==1.4.0
 argcomplete==3.6.3
 async-timeout==5.0.1
 attrs==25.4.0
+av==16.0.1
 certifi==2025.10.5
 charset-normalizer==3.4.4
 click==8.3.0

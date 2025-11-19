@@ -11,7 +11,7 @@
     "max_lane_points": 40,
     "agent_radius": 50.0,
     "lane_knn": 3,
-    "batch_size": 2,
+    "batch_size": 128,
     "num_workers": 0
   },
   "model": {
@@ -26,12 +26,21 @@
     }
   },
   "training": {
-    "epochs": 20,
+    "epochs": 50,
     "learning_rate": 0.001,
     "grad_clip": null,
     "device": "cuda",
     "log_every": 50,
     "checkpoint_dir": "checkpoints",
-    "log_dir": "runs"
+    "log_dir": "runs",
+    "lr_scheduler": {
+      "type": "plateau",
+      "factor": 0.5,
+      "patience": 3,
+      "threshold": 0.001,
+      "cooldown": 0,
+      "min_lr": 1e-5,
+      "verbose": true
+    }
   }
 }
