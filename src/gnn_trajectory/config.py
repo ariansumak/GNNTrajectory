@@ -11,8 +11,8 @@ from typing import Any, Dict
 import torch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-#DEFAULT_DATA_ROOT = Path.home() / "data"
-DEFAULT_DATA_ROOT = "/home/arian-sumak/Documents/DTU/Deep Learning"
+DEFAULT_DATA_ROOT = Path("/dtu/blackhole/07/224071/dataset")
+#DEFAULT_DATA_ROOT = "/home/arian-sumak/Documents/DTU/Deep Learning"
 
 def _to_path(value: Any) -> Path | None:
     if value is None or isinstance(value, Path):
