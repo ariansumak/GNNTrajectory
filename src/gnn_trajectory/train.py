@@ -279,6 +279,15 @@ def run_experiment(config: ExperimentConfig | None = None) -> None:
                     writer.add_scalar(f"val/{name}", value, epoch)
             if scheduler is not None:
                 scheduler.step(val_loss)
+            ckpt = {
+                "epoch": epoch,
+                "model_state": model.state_dict(),
+                "optimizer_state": optimizer.state_dict(),
+                "config": cfg_dict,
+            }
+            ckpt_path = cfg.training.checkpoint_dir / f"epoch_{epoch}.pt"
+            torch.save(ckpt, ckpt_path)
+            print(f"[ckpt] saved checkpoint to {ckpt_path}")
         elif scheduler is not None and epoch_steps > 0:
             avg_train_loss = epoch_loss_total / epoch_steps
             scheduler.step(avg_train_loss)
