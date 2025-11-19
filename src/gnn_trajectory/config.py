@@ -11,13 +11,13 @@ from typing import Any, Dict
 import torch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DATA_ROOT = "/home/arian-sumak/Documents/DTU/Deep Learning"
+DEFAULT_DATA_ROOT = Path.home() / "data"
 
 
 def _to_path(value: Any) -> Path | None:
     if value is None or isinstance(value, Path):
         return value
-    return Path(value)
+    return Path(value).expanduser()
 
 
 @dataclass
