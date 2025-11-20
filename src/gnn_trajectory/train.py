@@ -4,6 +4,7 @@ Command-line entry point for training runs.
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Callable, Dict
 
@@ -239,6 +240,8 @@ def run_experiment(config: ExperimentConfig | None = None) -> None:
         "HitRate@2m": make_hit_rate_metric(2.0),
     }
     writer = _maybe_create_writer(cfg)
+    if writer:
+        writer.add_text("config/full", json.dumps(cfg_dict, indent=2))
 
     global_step = 0
     for epoch in range(1, cfg.training.epochs + 1):
@@ -274,9 +277,9 @@ def run_experiment(config: ExperimentConfig | None = None) -> None:
             val_loss, val_metrics = _evaluate(model, val_loader, device, metrics)
             _log_metrics("val", epoch, global_step, val_loss, val_metrics)
             if writer:
-                writer.add_scalar("val/loss", val_loss, epoch)
+                writer.add_scalar("val/loss", val_loss, global_step)
                 for name, value in val_metrics.items():
-                    writer.add_scalar(f"val/{name}", value, epoch)
+                    writer.add_scalar(f"val/{name}", value, global_step)
             if scheduler is not None:
                 scheduler.step(val_loss)
             ckpt = {

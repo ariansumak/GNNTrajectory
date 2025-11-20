@@ -3,8 +3,8 @@
     "root": "/dtu/blackhole/07/224071/dataset",
     "split": "train",
     "val_split": "val",
-    "obs_seconds": 7.0,
-    "fut_seconds": 4.0,
+    "obs_seconds": 8.0,
+    "fut_seconds": 3.0,
     "frequency_hz": 10.0,
     "max_agents": 128,
     "max_lanes": 256,
@@ -26,7 +26,7 @@
     }
   },
   "training": {
-    "epochs": 50,
+    "epochs": 100,
     "learning_rate": 0.001,
     "grad_clip": null,
     "device": "cuda",
