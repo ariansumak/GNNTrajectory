@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import time
 from typing import Callable, Dict
 
 if __package__ is None or __package__ == "":  # pragma: no cover
@@ -14,14 +15,14 @@ if __package__ is None or __package__ == "":  # pragma: no cover
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 
 try:
     from torch.utils.tensorboard import SummaryWriter
 except ImportError:  # pragma: no cover
     SummaryWriter = None  # type: ignore
 
-from gnn_trajectory.config import ExperimentConfig, LRSchedulerConfig
+from gnn_trajectory.config import ExperimentConfig, LRSchedulerConfig, ModelConfig
 from gnn_trajectory.data import AV2GNNForecastingDataset
 from gnn_trajectory.losses import masked_l2_loss
 from gnn_trajectory.metrics import (
@@ -47,7 +48,13 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _build_dataloader(cfg: ExperimentConfig, split: str, shuffle: bool) -> DataLoader:
+def _build_dataloader(
+    cfg: ExperimentConfig,
+    split: str,
+    shuffle: bool,
+    limit: int | None = None,
+) -> DataLoader:
+    _ensure_split_directory(cfg.data.root, split)
     dataset = AV2GNNForecastingDataset(
         root=cfg.data.root,
         split=split,
@@ -60,6 +67,10 @@ def _build_dataloader(cfg: ExperimentConfig, split: str, shuffle: bool) -> DataL
         agent_radius=cfg.data.agent_radius,
         knn_lanes=cfg.data.lane_knn,
     )
+    if limit is not None and limit > 0:
+        capped = min(limit, len(dataset))
+        dataset = Subset(dataset, list(range(capped)))
+        print(f"[data] limiting split={split} to first {capped} samples")
     print(f"[data] split={split} root={cfg.data.root} samples={len(dataset)} shuffle={shuffle}")
     return DataLoader(
         dataset,
@@ -131,6 +142,7 @@ def _evaluate(
     loader: DataLoader,
     device: torch.device,
     metric_fns: Dict[str, Callable[[torch.Tensor, torch.Tensor, torch.Tensor | None], torch.Tensor]],
+    on_step: Callable[[float, Dict[str, float]], None] | None = None,
 ) -> tuple[float, Dict[str, float]]:
     model.eval()
     losses = []
@@ -143,6 +155,8 @@ def _evaluate(
             loss = masked_l2_loss(preds, targets, mask)
             losses.append(loss.item())
             metric_values = _compute_metrics(metric_fns, preds, targets, mask)
+            if on_step is not None:
+                on_step(loss.item(), metric_values)
             for name, value in metric_values.items():
                 aggregated[name].append(value)
     mean_loss = float(torch.tensor(losses).mean()) if losses else 0.0
@@ -150,12 +164,27 @@ def _evaluate(
     return mean_loss, mean_metrics
 
 
-def _maybe_create_writer(cfg: ExperimentConfig) -> SummaryWriter | None:
-    log_dir = cfg.training.log_dir
-    if log_dir is None or SummaryWriter is None:
-        return None
-    log_dir.mkdir(parents=True, exist_ok=True)
-    return SummaryWriter(log_dir=str(log_dir))
+def _prepare_run_outputs(
+    cfg: ExperimentConfig, model_cfg: ModelConfig
+) -> tuple[SummaryWriter | None, Path, Path]:
+    base_candidate = cfg.training.log_dir or cfg.training.checkpoint_dir or Path("outputs")
+    base_dir = Path(base_candidate).expanduser()
+    if base_dir.name != "outputs":
+        base_dir = base_dir / "outputs"
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    run_name = f"{model_cfg.encoder}-{model_cfg.decoder}_{timestamp}"
+    run_dir = base_dir / run_name
+    runs_dir = run_dir / "runs"
+    ckpt_dir = run_dir / "ckpts"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    writer: SummaryWriter | None = None
+    if SummaryWriter is not None:
+        writer = SummaryWriter(log_dir=str(runs_dir))
+        print(f"[tensorboard] logging run data to {runs_dir}")
+    else:  # pragma: no cover - tensorboard optional dependency
+        print(f"[tensorboard] SummaryWriter unavailable. Outputs in {run_dir}")
+    return writer, run_dir, ckpt_dir
 
 
 def _create_scheduler(
@@ -189,6 +218,18 @@ def _create_scheduler(
         return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, **kwargs)
 
 
+def _ensure_split_directory(root: Path | str, split: str | None) -> None:
+    if split is None:
+        return
+    root_path = Path(root)
+    candidate = root_path / split
+    if candidate.exists():
+        return
+    if root_path.exists() and root_path.name == split:
+        return
+    raise FileNotFoundError(f"Expected split directory '{split}' under '{root_path}', but it was not found.")
+
+
 def run_experiment(config: ExperimentConfig | None = None) -> None:
     """
     Assemble data loaders, instantiate the model, and launch training.
@@ -199,6 +240,9 @@ def run_experiment(config: ExperimentConfig | None = None) -> None:
 
     seed_everything(42)
 
+    writer, run_dir, ckpt_dir = _prepare_run_outputs(cfg, model_cfg)
+    cfg.training.checkpoint_dir = ckpt_dir
+
     cfg_dict = cfg.to_dict()
     print("[config] Experiment hyperparameters:")
     for section, values in cfg_dict.items():
@@ -208,10 +252,23 @@ def run_experiment(config: ExperimentConfig | None = None) -> None:
         for key, value in values.items():
             print(f"    {key}: {value}")
 
+    with open(run_dir / "config.json", "w", encoding="utf-8") as f:
+        json.dump(cfg_dict, f, indent=2)
+    with open(run_dir / "config.txt", "w", encoding="utf-8") as f:
+        f.write(json.dumps(cfg_dict, indent=2))
+
+    if writer:
+        writer.add_text("config/full", json.dumps(cfg_dict, indent=2))
+
     train_loader = _build_dataloader(cfg, cfg.data.split, shuffle=True)
     val_loader = None
+    val_limit = cfg.training.val_max_scenarios
     if cfg.data.val_split:
-        val_loader = _build_dataloader(cfg, cfg.data.val_split, shuffle=False)
+        val_loader = _build_dataloader(cfg, cfg.data.val_split, shuffle=False, limit=val_limit)
+    elif cfg.training.val_every_steps and cfg.training.val_every_steps > 0:
+        raise ValueError(
+            "Validation was requested (training.val_every_steps set) but data.val_split is missing."
+        )
 
     device = torch.device(cfg.training.device)
 
@@ -232,19 +289,61 @@ def run_experiment(config: ExperimentConfig | None = None) -> None:
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.training.learning_rate)
     scheduler = _create_scheduler(optimizer, cfg.training.lr_scheduler)
-    cfg.training.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     metrics = {
         "ADE": average_displacement_error,
         "FDE": final_displacement_error,
         "HitRate@2m": make_hit_rate_metric(2.0),
     }
-    writer = _maybe_create_writer(cfg)
-    if writer:
-        writer.add_text("config/full", json.dumps(cfg_dict, indent=2))
-
+    val_interval = cfg.training.val_every_steps
+    use_step_validation = val_interval is not None and val_interval > 0
     global_step = 0
+    val_step_counter = 0
+    last_val_step = 0
+
+    def _log_val_batch(loss_value: float, metric_values: Dict[str, float]) -> None:
+        nonlocal val_step_counter
+        if writer is None:
+            return
+        val_step_counter += 1
+        writer.add_scalar("val/loss", loss_value, val_step_counter)
+        for name, value in metric_values.items():
+            writer.add_scalar(f"val/{name}", value, val_step_counter)
+
+    current_epoch = 0
+
+    def _run_validation(trigger: str) -> None:
+        nonlocal last_val_step
+        if val_loader is None or global_step == 0:
+            return
+        print(f"[val] running validation ({trigger}) at step {global_step}")
+        val_loss, val_metrics = _evaluate(
+            model,
+            val_loader,
+            device,
+            metrics,
+            on_step=_log_val_batch if writer else None,
+        )
+        _log_metrics("val", current_epoch, global_step, val_loss, val_metrics)
+        if writer:
+            writer.add_scalar("val_summary/loss", val_loss, global_step)
+            for name, value in val_metrics.items():
+                writer.add_scalar(f"val_summary/{name}", value, global_step)
+        if scheduler is not None:
+            scheduler.step(val_loss)
+        ckpt = {
+            "epoch": current_epoch,
+            "model_state": model.state_dict(),
+            "optimizer_state": optimizer.state_dict(),
+            "config": cfg_dict,
+        }
+        ckpt_path = ckpt_dir / f"step_{global_step}_epoch_{current_epoch}.pt"
+        torch.save(ckpt, ckpt_path)
+        print(f"[ckpt] saved checkpoint to {ckpt_path}")
+        last_val_step = global_step
+
     for epoch in range(1, cfg.training.epochs + 1):
+        current_epoch = epoch
         print(f"[epoch] starting epoch {epoch}/{cfg.training.epochs}")
         model.train()
         epoch_loss_total = 0.0
@@ -272,28 +371,17 @@ def run_experiment(config: ExperimentConfig | None = None) -> None:
                     for name, value in metric_values.items():
                         writer.add_scalar(f"train/{name}", value, global_step)
 
-        if val_loader is not None:
-            print(f"[epoch] running validation after epoch {epoch}")
-            val_loss, val_metrics = _evaluate(model, val_loader, device, metrics)
-            _log_metrics("val", epoch, global_step, val_loss, val_metrics)
-            if writer:
-                writer.add_scalar("val/loss", val_loss, global_step)
-                for name, value in val_metrics.items():
-                    writer.add_scalar(f"val/{name}", value, global_step)
-            if scheduler is not None:
-                scheduler.step(val_loss)
-            ckpt = {
-                "epoch": epoch,
-                "model_state": model.state_dict(),
-                "optimizer_state": optimizer.state_dict(),
-                "config": cfg_dict,
-            }
-            ckpt_path = cfg.training.checkpoint_dir / f"epoch_{epoch}.pt"
-            torch.save(ckpt, ckpt_path)
-            print(f"[ckpt] saved checkpoint to {ckpt_path}")
-        elif scheduler is not None and epoch_steps > 0:
+            if use_step_validation and val_loader is not None and global_step % val_interval == 0:
+                _run_validation("interval")
+
+        if not use_step_validation and val_loader is not None:
+            _run_validation("epoch_end")
+        elif scheduler is not None and epoch_steps > 0 and val_loader is None:
             avg_train_loss = epoch_loss_total / epoch_steps
             scheduler.step(avg_train_loss)
+
+    if use_step_validation and val_loader is not None and global_step > 0 and last_val_step != global_step:
+        _run_validation("final")
 
     if writer:
         writer.close()

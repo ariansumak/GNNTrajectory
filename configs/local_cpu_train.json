@@ -1,6 +1,6 @@
 {
   "data": {
-    "root": "/dtu/blackhole/07/224071/dataset",
+    "root":"/home/arian-sumak/Documents/DTU/Deep Learning/dataset",
     "split": "train",
     "val_split": "val",
     "obs_seconds": 9.0,
@@ -11,30 +11,30 @@
     "max_lane_points": 40,
     "agent_radius": 50.0,
     "lane_knn": 3,
-    "batch_size": 128,
+    "batch_size": 2,
     "num_workers": 0
   },
   "model": {
     "encoder": "gcn_v2",
     "decoder": "mlp",
     "encoder_kwargs": {
-      "lstm_hidden": 128,
-      "gcn_hidden": 128
+      "lstm_hidden": 64,
+      "gcn_hidden": 64
     },
     "decoder_kwargs": {
-      "hidden_dim": 128
+      "hidden_dim": 64
     }
   },
   "training": {
-    "epochs": 1,
-    "learning_rate": 0.001,
+    "epochs": 100,
+    "learning_rate": 0.00001,
     "grad_clip": null,
-    "device": "cuda",
+    "device": "cpu",
     "log_every": 50,
-    "val_every_steps": 2000,
+    "val_every_steps": 50,
     "val_max_scenarios": 10,
     "checkpoint_dir": "checkpoints",
-    "log_dir": "/dtu/blackhole/07/224071/runs",
+    "log_dir": "/home/arian-sumak/Documents/DTU/Deep Learning",
     "lr_scheduler": {
       "type": "plateau",
       "factor": 0.5,
