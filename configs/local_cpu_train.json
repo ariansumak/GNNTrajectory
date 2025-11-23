@@ -31,8 +31,9 @@
     "grad_clip": null,
     "device": "cpu",
     "log_every": 50,
-    "val_every_steps": 50,
+    "val_every_steps": 10000,
     "val_max_scenarios": 10,
+    "train_max_scenarios": 100,
     "checkpoint_dir": "checkpoints",
     "log_dir": "/home/arian-sumak/Documents/DTU/Deep Learning",
     "lr_scheduler": {

@@ -70,6 +70,7 @@ class TrainingConfig:
     lr_scheduler: LRSchedulerConfig | None = None
     val_every_steps: int | None = 1000
     val_max_scenarios: int | None = None
+    train_max_scenarios: int | None = None
 
 
 @dataclass

@@ -40,7 +40,7 @@ fi
 source "/dtu/blackhole/07/224071/GNNenv/bin/activate"
 module load cuda/12.8.1
 
-# ⬇️ IMPORTANT: go to the repo root on blackhole
+# go to the repo root on blackhole
 cd /dtu/blackhole/07/224071/GNNTrajectory
 
 # Run training from repo root

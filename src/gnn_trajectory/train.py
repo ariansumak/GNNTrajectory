@@ -166,25 +166,25 @@ def _evaluate(
 
 def _prepare_run_outputs(
     cfg: ExperimentConfig, model_cfg: ModelConfig
-) -> tuple[SummaryWriter | None, Path, Path]:
-    base_candidate = cfg.training.log_dir or cfg.training.checkpoint_dir or Path("outputs")
-    base_dir = Path(base_candidate).expanduser()
-    if base_dir.name != "outputs":
-        base_dir = base_dir / "outputs"
-    timestamp = time.strftime("%Y%m%d-%H%M%S")
-    run_name = f"{model_cfg.encoder}-{model_cfg.decoder}_{timestamp}"
+) -> tuple[SummaryWriter | None, Path, Path, Path]:
+    log_root = Path(cfg.training.log_dir).expanduser() if cfg.training.log_dir else None
+    ckpt_root = Path(cfg.training.checkpoint_dir).expanduser() if cfg.training.checkpoint_dir else None
+    base_dir = log_root or ckpt_root or Path("outputs")
+    split_name = cfg.data.split or "train"
+    run_name = f"{split_name}_{model_cfg.encoder}-{model_cfg.decoder}"
     run_dir = base_dir / run_name
-    runs_dir = run_dir / "runs"
-    ckpt_dir = run_dir / "ckpts"
-    runs_dir.mkdir(parents=True, exist_ok=True)
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    tb_dir = run_dir / "tensorboard"
+    ckpt_dir = run_dir / "checkpoints"
+    artifact_dir = run_dir / "artifacts"
+    for directory in (tb_dir, ckpt_dir, artifact_dir):
+        directory.mkdir(parents=True, exist_ok=True)
     writer: SummaryWriter | None = None
     if SummaryWriter is not None:
-        writer = SummaryWriter(log_dir=str(runs_dir))
-        print(f"[tensorboard] logging run data to {runs_dir}")
+        writer = SummaryWriter(log_dir=str(tb_dir))
+        print(f"[tensorboard] logging run data to {tb_dir}")
     else:  # pragma: no cover - tensorboard optional dependency
         print(f"[tensorboard] SummaryWriter unavailable. Outputs in {run_dir}")
-    return writer, run_dir, ckpt_dir
+    return writer, run_dir, ckpt_dir, artifact_dir
 
 
 def _create_scheduler(
@@ -240,7 +240,7 @@ def run_experiment(config: ExperimentConfig | None = None) -> None:
 
     seed_everything(42)
 
-    writer, run_dir, ckpt_dir = _prepare_run_outputs(cfg, model_cfg)
+    writer, run_dir, ckpt_dir, artifact_dir = _prepare_run_outputs(cfg, model_cfg)
     cfg.training.checkpoint_dir = ckpt_dir
 
     cfg_dict = cfg.to_dict()
@@ -252,15 +252,16 @@ def run_experiment(config: ExperimentConfig | None = None) -> None:
         for key, value in values.items():
             print(f"    {key}: {value}")
 
-    with open(run_dir / "config.json", "w", encoding="utf-8") as f:
+    with open(artifact_dir / "config.json", "w", encoding="utf-8") as f:
         json.dump(cfg_dict, f, indent=2)
-    with open(run_dir / "config.txt", "w", encoding="utf-8") as f:
+    with open(artifact_dir / "config.txt", "w", encoding="utf-8") as f:
         f.write(json.dumps(cfg_dict, indent=2))
 
     if writer:
         writer.add_text("config/full", json.dumps(cfg_dict, indent=2))
 
-    train_loader = _build_dataloader(cfg, cfg.data.split, shuffle=True)
+    train_limit = cfg.training.train_max_scenarios
+    train_loader = _build_dataloader(cfg, cfg.data.split, shuffle=True, limit=train_limit)
     val_loader = None
     val_limit = cfg.training.val_max_scenarios
     if cfg.data.val_split:
@@ -348,7 +349,14 @@ def run_experiment(config: ExperimentConfig | None = None) -> None:
         model.train()
         epoch_loss_total = 0.0
         epoch_steps = 0
+        epoch_start_time = time.time()
+        first_batch_reported = False
         for batch in train_loader:
+            if not first_batch_reported:
+                print(
+                    f"[epoch] first batch ready after {time.time() - epoch_start_time:.2f}s"
+                )
+                first_batch_reported = True
             batch = _move_batch_to_device(batch, device)
             preds, _ = model(batch)
             targets, mask = _extract_targets(batch, preds)

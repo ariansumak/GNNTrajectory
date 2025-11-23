@@ -16,13 +16,14 @@
   },
   "model": {
     "encoder": "gcn_v2",
-    "decoder": "mlp",
+    "decoder": "lstm",
     "encoder_kwargs": {
       "lstm_hidden": 128,
       "gcn_hidden": 128
     },
     "decoder_kwargs": {
-      "hidden_dim": 128
+      "hidden_dim": 128,
+      "num_layers": 1
     }
   },
   "training": {
