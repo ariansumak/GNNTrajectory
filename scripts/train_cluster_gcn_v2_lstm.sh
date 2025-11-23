@@ -28,19 +28,21 @@
 ### -- set the job output file --
 ### -- Specify the output and error file. %J is the job-id --
 ### -- -o and -e mean append, -oo and -eo mean overwrite --
-#BSUB -o logs/train_gnn_gcn_v2_lstm.out
-#BSUB -e logs/train_gnn_gcn_v2_lstm.err
-
-CONFIG_PATH="configs/cluster_train_gcn_v2_lstm.json"
+#BSUB -o train_gnn_traj_%J.out
+#BSUB -e train_gnn_traj_%J.err
+# all  BSUB option comments should be above this line!
 
 if [ ! -d "/dtu/blackhole/07/224071/GNNenv" ]; then
     python3 -m venv "/dtu/blackhole/07/224071/GNNenv"
 fi
 
+# Activate your venv in blackhole
 source "/dtu/blackhole/07/224071/GNNenv/bin/activate"
 module load cuda/12.8.1
 
+# go to the repo root on blackhole
 cd /dtu/blackhole/07/224071/GNNTrajectory
 
+# Run training from repo root
 export PYTHONPATH=src
-python -m gnn_trajectory.train --config "$CONFIG_PATH"
+python src/gnn_trajectory/train.py --config configs/cluster_train_gcn_v2_lstm.json
