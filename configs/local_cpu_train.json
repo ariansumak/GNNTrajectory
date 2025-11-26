@@ -15,24 +15,26 @@
     "num_workers": 0
   },
   "model": {
-    "encoder": "gcn_v2",
+    "encoder": "gat",
     "decoder": "mlp",
     "encoder_kwargs": {
       "lstm_hidden": 64,
-      "gcn_hidden": 64
+      "gat_hidden": 64,
+      "gat_heads": 4,
+      "gat_layers": 2
     },
     "decoder_kwargs": {
       "hidden_dim": 64
     }
   },
   "training": {
-    "epochs": 100,
+    "epochs": 5,
     "learning_rate": 0.00001,
     "grad_clip": null,
     "device": "cpu",
     "log_every": 50,
-    "val_every_steps": 10000,
-    "val_max_scenarios": 10,
+    "val_every_steps": null,
+    "val_max_scenarios": 50,
     "train_max_scenarios": 100,
     "checkpoint_dir": "checkpoints",
     "log_dir": "/home/arian-sumak/Documents/DTU/Deep Learning",

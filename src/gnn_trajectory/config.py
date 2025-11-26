@@ -33,7 +33,7 @@ class DataConfig:
     max_lane_points: int = 40
     agent_radius: float = 50.0
     lane_knn: int = 3
-    batch_size: int = 2
+    batch_size: int = 1
     num_workers: int = 0
 
 
@@ -41,7 +41,7 @@ class DataConfig:
 class ModelConfig:
     history_steps: int = 0
     future_steps: int = 0
-    encoder: str = "gcn_v2"
+    encoder: str = "gat"
     decoder: str = "mlp"
     encoder_kwargs: Dict[str, Any] = field(default_factory=dict)
     decoder_kwargs: Dict[str, Any] = field(default_factory=dict)
