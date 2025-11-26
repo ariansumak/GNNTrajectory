@@ -26,14 +26,14 @@
     }
   },
   "training": {
-    "epochs": 30,
+    "epochs": 20,
     "learning_rate": 0.001,
     "grad_clip": null,
     "device": "cuda",
     "log_every": 50,
     "val_every_steps": null,
     "val_max_scenarios": 200,
-    "train_max_scenarios": 50000,
+    "train_max_scenarios": 10000,
     "checkpoint_dir": "checkpoints",
     "log_dir": "/dtu/blackhole/07/224071/runs",
     "lr_scheduler": {
