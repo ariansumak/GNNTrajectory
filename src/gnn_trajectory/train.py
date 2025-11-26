@@ -178,10 +178,13 @@ def _prepare_run_outputs(
     artifact_dir = run_dir / "artifacts"
     for directory in (tb_dir, ckpt_dir, artifact_dir):
         directory.mkdir(parents=True, exist_ok=True)
+    run_stamp = time.strftime("%Y%m%d-%H%M%S")
+    tb_run_dir = tb_dir / run_stamp
+    tb_run_dir.mkdir(parents=True, exist_ok=True)
     writer: SummaryWriter | None = None
     if SummaryWriter is not None:
-        writer = SummaryWriter(log_dir=str(tb_dir))
-        print(f"[tensorboard] logging run data to {tb_dir}")
+        writer = SummaryWriter(log_dir=str(tb_run_dir))
+        print(f"[tensorboard] logging run data to {tb_run_dir}")
     else:  # pragma: no cover - tensorboard optional dependency
         print(f"[tensorboard] SummaryWriter unavailable. Outputs in {run_dir}")
     return writer, run_dir, ckpt_dir, artifact_dir
