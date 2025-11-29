@@ -142,25 +142,28 @@ def _evaluate(
     loader: DataLoader,
     device: torch.device,
     metric_fns: Dict[str, Callable[[torch.Tensor, torch.Tensor, torch.Tensor | None], torch.Tensor]],
-    on_step: Callable[[float, Dict[str, float]], None] | None = None,
 ) -> tuple[float, Dict[str, float]]:
     model.eval()
-    losses = []
-    aggregated: Dict[str, list[float]] = {name: [] for name in metric_fns.keys()}
+    total_samples = 0
+    loss_sum = 0.0
+    metric_sums: Dict[str, float] = {name: 0.0 for name in metric_fns.keys()}
     with torch.no_grad():
         for batch in loader:
             batch = _move_batch_to_device(batch, device)
             preds, _ = model(batch)
             targets, mask = _extract_targets(batch, preds)
             loss = masked_l2_loss(preds, targets, mask)
-            losses.append(loss.item())
+            batch_size = preds.shape[0]
+            total_samples += batch_size
+            loss_sum += loss.item() * batch_size
             metric_values = _compute_metrics(metric_fns, preds, targets, mask)
-            if on_step is not None:
-                on_step(loss.item(), metric_values)
             for name, value in metric_values.items():
-                aggregated[name].append(value)
-    mean_loss = float(torch.tensor(losses).mean()) if losses else 0.0
-    mean_metrics = {name: (sum(values) / len(values) if values else 0.0) for name, values in aggregated.items()}
+                metric_sums[name] += value * batch_size
+    if total_samples == 0:
+        zero_metrics = {name: 0.0 for name in metric_fns.keys()}
+        return 0.0, zero_metrics
+    mean_loss = loss_sum / total_samples
+    mean_metrics = {name: metric_sum / total_samples for name, metric_sum in metric_sums.items()}
     return mean_loss, mean_metrics
 
 
@@ -302,17 +305,7 @@ def run_experiment(config: ExperimentConfig | None = None) -> None:
     val_interval = cfg.training.val_every_steps
     use_step_validation = val_interval is not None and val_interval > 0
     global_step = 0
-    val_step_counter = 0
     last_val_step = 0
-
-    def _log_val_batch(loss_value: float, metric_values: Dict[str, float]) -> None:
-        nonlocal val_step_counter
-        if writer is None:
-            return
-        val_step_counter += 1
-        writer.add_scalar("val/loss", loss_value, val_step_counter)
-        for name, value in metric_values.items():
-            writer.add_scalar(f"val/{name}", value, val_step_counter)
 
     current_epoch = 0
 
@@ -326,13 +319,12 @@ def run_experiment(config: ExperimentConfig | None = None) -> None:
             val_loader,
             device,
             metrics,
-            on_step=_log_val_batch if writer else None,
         )
         _log_metrics("val", current_epoch, global_step, val_loss, val_metrics)
         if writer:
-            writer.add_scalar("val_summary/loss", val_loss, global_step)
+            writer.add_scalar("val/loss", val_loss, global_step)
             for name, value in val_metrics.items():
-                writer.add_scalar(f"val_summary/{name}", value, global_step)
+                writer.add_scalar(f"val/{name}", value, global_step)
         if scheduler is not None:
             scheduler.step(val_loss)
         ckpt = {
