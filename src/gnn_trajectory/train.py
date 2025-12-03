@@ -175,13 +175,13 @@ def _prepare_run_outputs(
     base_dir = log_root or ckpt_root or Path("outputs")
     split_name = cfg.data.split or "train"
     run_name = f"{split_name}_{model_cfg.encoder}-{model_cfg.decoder}"
+    run_stamp = time.strftime("%Y%m%d-%H%M%S")
     run_dir = base_dir / run_name
     tb_dir = run_dir / "tensorboard"
-    ckpt_dir = run_dir / "checkpoints"
+    ckpt_dir = run_dir / "checkpoints" / run_stamp
     artifact_dir = run_dir / "artifacts"
     for directory in (tb_dir, ckpt_dir, artifact_dir):
         directory.mkdir(parents=True, exist_ok=True)
-    run_stamp = time.strftime("%Y%m%d-%H%M%S")
     tb_run_dir = tb_dir / run_stamp
     tb_run_dir.mkdir(parents=True, exist_ok=True)
     writer: SummaryWriter | None = None

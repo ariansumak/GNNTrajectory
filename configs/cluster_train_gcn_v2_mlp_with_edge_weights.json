@@ -11,29 +11,29 @@
     "max_lane_points": 40,
     "agent_radius": 50.0,
     "lane_knn": 8,
-    "batch_size": 128,
+    "batch_size": 116,
     "num_workers": 0
   },
   "model": {
     "encoder": "gcn_v2",
     "decoder": "mlp",
     "encoder_kwargs": {
-      "lstm_hidden": 128,
-      "gcn_hidden": 128,
+      "lstm_hidden": 64,
+      "gcn_hidden": 64,
       "with_edge_weights": true
     },
     "decoder_kwargs": {
-      "hidden_dim": 128
+      "hidden_dim": 64
     }
   },
   "training": {
-    "epochs": 20,
-    "learning_rate": 0.0001,
+    "epochs": 70,
+    "learning_rate": 0.001,
     "grad_clip": null,
     "device": "cuda",
     "log_every": 50,
     "val_every_steps": null,
-    "val_max_scenarios": 200,
+    "val_max_scenarios": 700,
     "train_max_scenarios": 10000,
     "checkpoint_dir": "checkpoints",
     "log_dir": "/dtu/blackhole/07/224071/runs",
