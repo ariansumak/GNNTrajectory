@@ -34,6 +34,7 @@ def collate_fn(batch):
         "agent_pos_T": [],
         "edge_index_aa": [],
         "edges_length": [],
+        "edges_length_al": [],
         "lane_nodes": [],
         "edge_index_al": [],
         "batch_agent": [],
@@ -83,6 +84,7 @@ def collate_fn(batch):
         ei_aa = ei_aa + agent_offset
         out["edge_index_aa"].append(ei_aa)
         out["edges_length"].append(el_aa)
+        out["edges_length_al"].append(data["edges_length_al"])
 
         # edges agent-lane (offset both sides into global agent/lane spaces)
         ei_al = data["edge_index_al"].clone()  # (2, E)
@@ -118,6 +120,7 @@ def collate_fn(batch):
 
     out["edge_index_aa"] = torch.cat(out["edge_index_aa"], dim=1)
     out["edges_length"]  = torch.cat(out["edges_length"], dim=0)
+    out["edges_length_al"] = torch.cat(out["edges_length_al"], dim=0)
     out["edge_index_al"] = torch.cat(out["edge_index_al"], dim=1)
     out["lane_nodes"]    = torch.cat(out["lane_nodes"], dim=0)
     out["batch_agent"]   = torch.cat(out["batch_agent"], dim=0)
