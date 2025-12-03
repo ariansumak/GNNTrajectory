@@ -197,8 +197,8 @@ class AV2GNNForecastingDataset(Dataset):
         lane_nodes_np = lane_nodes[:L]  # only real lanes
 
         for ai, li in edge_al.T:  # iterate over edges
-            agent_xy = agent_pos_T[ai].numpy()
-            polyline = lane_nodes_np[li].numpy()[:lane_lengths[li]]  # truncate padded polyline
+            agent_xy = agent_pos_T[ai]
+            polyline = lane_nodes_np[li][:lane_lengths[li]]  # truncate padded polyline
             d = _point_to_polyline_distance(agent_xy, polyline)
             edges_length_al.append(d)
 
