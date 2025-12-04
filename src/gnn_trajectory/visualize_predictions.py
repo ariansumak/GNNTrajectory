@@ -94,7 +94,7 @@ def load_checkpoint(model: torch.nn.Module, ckpt_path: Path, device: torch.devic
 
     if isinstance(ckpt, dict):
         # Try common keys first; fall back to assuming it's a raw state_dict.
-        for key in ["state_dict", "model_state_dict", "model"]:
+        for key in ["state_dict", "model_state_dict", "model", "model_state"]:
             if key in ckpt and isinstance(ckpt[key], dict):
                 ckpt = ckpt[key]
                 break
@@ -158,7 +158,7 @@ def visualize_with_prediction(sample: Dict[str, Any], pred_traj: np.ndarray) -> 
         valid = (ln != 0).any(axis=1)
         pts = ln[valid]
         if len(pts) > 1:
-            plt.plot(pts[:, 0], pts[:, 1], color="lightgray", lw=0.6, alpha=0.5)
+            plt.plot(pts[:, 0], pts[:, 1], color="lightgray", lw=0.2, alpha=0.5)
 
     # All agents: history + GT future
     for ah, fut, mask, cls in zip(agent_hist, fut_traj, fut_mask, agent_types):
@@ -168,7 +168,7 @@ def visualize_with_prediction(sample: Dict[str, Any], pred_traj: np.ndarray) -> 
         valid_obs &= (np.abs(ah[:, 0]) < 200) & (np.abs(ah[:, 1]) < 200)
         obs_pts = ah[valid_obs]
         if len(obs_pts) > 1:
-            plt.plot(obs_pts[:, 0], obs_pts[:, 1], ".-", lw=1, color=color, alpha=0.8)
+            plt.plot(obs_pts[:, 0], obs_pts[:, 1], ".-", lw=0.2, color=color, alpha=0.8)
 
         valid_fut = mask > 0
         fut_pts = fut[valid_fut]
@@ -196,7 +196,7 @@ def visualize_with_prediction(sample: Dict[str, Any], pred_traj: np.ndarray) -> 
             focal_gt[:, 1],
             color="orange",
             linestyle="--",
-            lw=2,
+            lw=4,
             label="Focal GT future",
         )
 
@@ -218,7 +218,41 @@ def visualize_with_prediction(sample: Dict[str, Any], pred_traj: np.ndarray) -> 
     plt.xlabel("x [m]")
     plt.ylabel("y [m]")
     plt.legend()
+
+    # ---------------------------------------------------------------
+    # AXIS EQUAL FIRST (so aspect ratio is correct)
+    # ---------------------------------------------------------------
     plt.axis("equal")
+
+    # ---------------------------------------------------------------
+    # ZOOM IN (PLACE HERE)
+    # ---------------------------------------------------------------
+    # Focal history (only x,y)
+    focal_hist = agent_hist[focal_idx][:, :2]
+    focal_hist = focal_hist[np.isfinite(focal_hist[:, 0])]
+
+    # focal_gt already computed above
+
+    # stack preds
+    all_preds = []
+    for pred in preds:
+        pred_pts = pred[(np.abs(pred[:, 0]) < 200) & (np.abs(pred[:, 1]) < 200)]
+        if len(pred_pts) > 0:
+            all_preds.append(pred_pts)
+    all_preds = np.vstack(all_preds) if len(all_preds) else np.zeros((0, 2))
+
+    # gather all focal points
+    all_pts = np.vstack([p for p in [focal_hist, focal_gt, all_preds] if len(p) > 0])
+
+    # bounding box
+    margin = 5
+    min_x, max_x = all_pts[:, 0].min(), all_pts[:, 0].max()
+    min_y, max_y = all_pts[:, 1].min(), all_pts[:, 1].max()
+
+    plt.xlim(min_x - margin, max_x + margin)
+    plt.ylim(min_y - margin, max_y + margin)
+    # ---------------------------------------------------------------
+
     plt.show()
 
 
