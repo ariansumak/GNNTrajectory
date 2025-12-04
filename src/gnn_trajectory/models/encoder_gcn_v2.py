@@ -74,8 +74,10 @@ class MotionEncoderGCN(nn.Module):
 
         # Agent-agent edges
         ei_aa = edge_index_aa                     # (2, E_aa)
-        w_aa  = self.edge_mlp(edges_length.view(-1, 1)).view(-1)  # (E_aa,)
-        w_al  = self.edge_mlp(edges_length_al.view(-1, 1)).view(-1)  # (E_al,)
+        w_aa = self.edge_mlp(edges_length.view(-1, 1)).view(-1)  # (E_aa,)
+        # Compute weights for agent-lane edges and duplicate for both directions
+        w_al_single = self.edge_mlp(edges_length_al.view(-1, 1)).view(-1)  # (E_al,)
+        w_al = torch.cat([w_al_single, w_al_single], dim=0)  # (2*E_al,)
 
         # Agent-lane edges (bidirectional, weight=1)
         agents_al = edge_index_al[0]

@@ -15,13 +15,12 @@
     "num_workers": 0
   },
   "model": {
-    "encoder": "gat",
+    "encoder": "gcn_v2",
     "decoder": "mlp",
     "encoder_kwargs": {
       "lstm_hidden": 64,
-      "gat_hidden": 64,
-      "gat_heads": 4,
-      "gat_layers": 2
+      "gcn_hidden": 64,
+      "with_edge_weights": true
     },
     "decoder_kwargs": {
       "hidden_dim": 64
