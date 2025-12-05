@@ -6,5 +6,7 @@ __pycache__/
 # Local data and outputs
 /data/
 outputs/
-checkpoints/
 /av2-api
+/runs
+/checkpoints
+/src/gnn_trajectory/runs

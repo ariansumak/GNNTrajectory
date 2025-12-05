@@ -3,6 +3,7 @@ Collection of motion forecasting metrics.
 """
 from __future__ import annotations
 
+from functools import partial
 import torch
 
 
@@ -38,4 +39,34 @@ def final_displacement_error(
     return _apply_mask(final_error, mask)
 
 
-__all__ = ["average_displacement_error", "final_displacement_error"]
+def final_displacement_within_threshold(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    mask: torch.Tensor | None = None,
+    threshold: float = 2.0,
+) -> torch.Tensor:
+    """
+    Fraction of trajectories whose final position error is below a threshold (hit-rate style accuracy).
+    """
+
+    final_error = torch.linalg.norm(pred[..., -1, :] - target[..., -1, :], dim=-1)
+    hits = (final_error <= threshold).float()
+    if mask is not None:
+        mask = mask[..., -1]
+    return _apply_mask(hits, mask)
+
+
+def make_hit_rate_metric(threshold: float) -> torch.Tensor:
+    """
+    Helper to create a callable that measures hit-rate at the specified threshold.
+    """
+
+    return partial(final_displacement_within_threshold, threshold=threshold)
+
+
+__all__ = [
+    "average_displacement_error",
+    "final_displacement_error",
+    "final_displacement_within_threshold",
+    "make_hit_rate_metric",
+]
