@@ -11,8 +11,8 @@ from typing import Any, Dict
 import torch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-#DEFAULT_DATA_ROOT = Path.home() / "data"
-DEFAULT_DATA_ROOT = "/home/arian-sumak/Documents/DTU/Deep Learning"
+DEFAULT_DATA_ROOT = Path("/dtu/blackhole/07/224071/dataset")
+#DEFAULT_DATA_ROOT = "/home/arian-sumak/Documents/DTU/Deep Learning"
 
 def _to_path(value: Any) -> Path | None:
     if value is None or isinstance(value, Path):
@@ -33,7 +33,7 @@ class DataConfig:
     max_lane_points: int = 40
     agent_radius: float = 50.0
     lane_knn: int = 3
-    batch_size: int = 2
+    batch_size: int = 1
     num_workers: int = 0
 
 
@@ -41,7 +41,7 @@ class DataConfig:
 class ModelConfig:
     history_steps: int = 0
     future_steps: int = 0
-    encoder: str = "gcn_v2"
+    encoder: str = "gat"
     decoder: str = "mlp"
     encoder_kwargs: Dict[str, Any] = field(default_factory=dict)
     decoder_kwargs: Dict[str, Any] = field(default_factory=dict)
@@ -68,6 +68,9 @@ class TrainingConfig:
     checkpoint_dir: Path = Path("checkpoints")
     log_dir: Path | None = Path("runs")
     lr_scheduler: LRSchedulerConfig | None = None
+    val_every_steps: int | None = 1000
+    val_max_scenarios: int | None = None
+    train_max_scenarios: int | None = None
 
 
 @dataclass

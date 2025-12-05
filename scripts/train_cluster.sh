@@ -32,13 +32,18 @@
 #BSUB -e train_gnn_traj_%J.err
 # all  BSUB option comments should be above this line!
 
-# execute our command
-if [ ! -d "$HOME/02516_venv" ]; then
-  python3 -m venv "$HOME/02516_venv"
+if [ ! -d "/dtu/blackhole/07/224071/GNNenv" ]; then
+    python3 -m venv "/dtu/blackhole/07/224071/GNNenv"
 fi
-source "$HOME/02516_venv/bin/activate"
+
+# Activate your venv in blackhole
+source "/dtu/blackhole/07/224071/GNNenv/bin/activate"
 module load cuda/12.8.1
 
-cd "$HOME/code/GNNTrajectory"
+# go to the repo root on blackhole
+cd /dtu/blackhole/07/224071/GNNTrajectory
 
-PYTHONPATH=src python src/gnn_trajectory/train.py --config configs/cluster_train.json
+# Run training from repo root
+export PYTHONPATH=src
+python src/gnn_trajectory/train.py --config configs/cluster_train.json
+

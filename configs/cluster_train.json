@@ -1,37 +1,49 @@
 {
   "data": {
-    "root": "~/data",
+    "root": "/dtu/blackhole/07/224071/dataset",
     "split": "train",
     "val_split": "val",
-    "obs_seconds": 7.0,
-    "fut_seconds": 4.0,
+    "obs_seconds": 8.0,
+    "fut_seconds": 3.0,
     "frequency_hz": 10.0,
     "max_agents": 128,
     "max_lanes": 256,
     "max_lane_points": 40,
     "agent_radius": 50.0,
     "lane_knn": 3,
-    "batch_size": 2,
+    "batch_size": 128,
     "num_workers": 0
   },
   "model": {
     "encoder": "gcn_v2",
     "decoder": "mlp",
     "encoder_kwargs": {
-      "lstm_hidden": 64,
-      "gcn_hidden": 64
+      "lstm_hidden": 128,
+      "gcn_hidden": 128
     },
     "decoder_kwargs": {
-      "hidden_dim": 64
+      "hidden_dim": 128
     }
   },
   "training": {
-    "epochs": 20,
+    "epochs": 30,
     "learning_rate": 0.001,
     "grad_clip": null,
     "device": "cuda",
     "log_every": 50,
+    "val_every_steps": null,
+    "val_max_scenarios": 200,
+    "train_max_scenarios": 50000,
     "checkpoint_dir": "checkpoints",
-    "log_dir": "runs"
+    "log_dir": "/dtu/blackhole/07/224071/runs",
+    "lr_scheduler": {
+      "type": "plateau",
+      "factor": 0.5,
+      "patience": 3,
+      "threshold": 0.001,
+      "cooldown": 0,
+      "min_lr": 1e-5,
+      "verbose": true
+    }
   }
 }

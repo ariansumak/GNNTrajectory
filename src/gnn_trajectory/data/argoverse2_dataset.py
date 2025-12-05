@@ -37,6 +37,30 @@ def _knn(a, b, k):
     idx = np.argsort(d, axis=1)[:, :min(k, len(b))]
     return np.stack([np.repeat(np.arange(len(a)), idx.shape[1]), idx.reshape(-1)], 0)
 
+def _point_to_polyline_distance(P, polyline):
+    """
+    P: (2,) point
+    polyline: (M,2) array of lane centerline points
+    Returns shortest Euclidean distance from P to any line segment.
+    """
+    if len(polyline) < 2:
+        return np.linalg.norm(P - polyline[0])
+
+    dmin = float("inf")
+    for i in range(len(polyline) - 1):
+        A = polyline[i]
+        B = polyline[i+1]
+        AB = B - A
+        AP = P - A
+        t = np.dot(AP, AB) / (np.dot(AB, AB) + 1e-9)
+        t = np.clip(t, 0.0, 1.0)
+        proj = A + t * AB
+        d = np.linalg.norm(P - proj)
+        if d < dmin:
+            dmin = d
+    return dmin
+
+
 class AV2GNNForecastingDataset(Dataset):
     """Dataset using local maps and converting to the focal agent’s local coordinate frame."""
     def __init__(self, root: str | Path, split="train",
@@ -164,6 +188,24 @@ class AV2GNNForecastingDataset(Dataset):
         lane_nodes = np.pad(np.stack(lane_nodes), ((0, self.max_lanes - L), (0, 0), (0, 0)))
         lane_centroids = np.pad(np.stack(lane_centroids), ((0, self.max_lanes - L), (0, 0)))
         edge_al = _knn(agent_pos_T[:A], lane_centroids[:L], self.knn_lanes)
+
+        # edge agent distances
+        # ---- Compute true geometric distance agent -> lane polyline ----
+        edges_length_al = []
+
+        # lane_nodes shape: (L, max_pts, 2)
+        lane_nodes_np = lane_nodes[:L]  # only real lanes
+
+        for ai, li in edge_al.T:  # iterate over edges
+            agent_xy = agent_pos_T[ai]
+            polyline = lane_nodes_np[li][:lane_lengths[li]]  # truncate padded polyline
+            d = _point_to_polyline_distance(agent_xy, polyline)
+            edges_length_al.append(d)
+
+        edges_length_al = np.array(edges_length_al, dtype=float)
+
+
+
         lane_topo = np.array(topo, int).T if topo else np.zeros((2, 0), int)
 
         # ---------- Output ----------
@@ -174,6 +216,7 @@ class AV2GNNForecastingDataset(Dataset):
             "agent_pos_T": torch.tensor(agent_pos_T, dtype=torch.float32),
             "edge_index_aa": torch.tensor(edge_aa, dtype=torch.int64),
             "edges_length": torch.tensor(edges_length, dtype=torch.float32),
+            "edges_length_al": torch.tensor(edges_length_al, dtype=torch.float32),
             "lane_nodes": torch.tensor(lane_nodes, dtype=torch.float32),
             "lane_topology": torch.tensor(lane_topo, dtype=torch.int64),
             "edge_index_al": torch.tensor(edge_al, dtype=torch.int64),
