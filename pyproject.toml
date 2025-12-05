@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gnn-trajectory"
+version = "0.1.0"
+description = "Graph neural network baselines for Argoverse 2 trajectory forecasting."
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = ["trajectory forecasting", "gnn", "av2"]
+authors = [
+    {name = "GNNTrajectory Contributors"}
+]
+dependencies = []
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
